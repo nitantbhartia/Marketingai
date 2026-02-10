@@ -1,0 +1,74 @@
+# ClaimCoach Content Pipeline Configuration
+# Copy to config.yaml and fill in your API keys
+
+# Claude API (required)
+anthropic:
+  api_key: "sk-ant-..."
+  writing_model: "claude-sonnet-4-20250514"    # For Quill (writing)
+  review_model: "claude-haiku-4-20250514"      # For Sage (review/scoring)
+
+# Blog CMS - Ghost (Phase 2+)
+ghost:
+  url: "https://claimcoach.app"
+  admin_api_key: ""
+  content_api_key: ""
+
+# Blog CMS - WordPress alternative (Phase 2+)
+wordpress:
+  url: ""
+  username: ""
+  app_password: ""
+
+# Keyword Research (Phase 2+)
+# Choose one: ahrefs or semrush
+ahrefs:
+  api_key: ""
+
+semrush:
+  api_key: ""
+
+# Plagiarism checking (Phase 2+)
+copyscape:
+  api_key: ""
+  username: ""
+
+# Social APIs (Phase 3+)
+reddit:
+  client_id: ""
+  client_secret: ""
+  username: ""
+  password: ""
+
+twitter:
+  api_key: ""
+  api_secret: ""
+  access_token: ""
+  access_token_secret: ""
+
+# Google Search Console (Phase 2+)
+google:
+  search_console_credentials: ""
+
+# Image generation (Phase 2+)
+openai:
+  api_key: ""
+
+# Pipeline settings
+pipeline:
+  database_path: "pipeline.db"
+  product_context_path: "PRODUCT_CONTEXT.md"
+  state_rules_path: "STATE_RULES.md"
+  blog_output_dir: "output/blog"
+  min_backlog_topics: 15
+  articles_per_week_target: 4
+  max_revision_rounds: 3
+
+# Scheduling (cron expressions)
+schedule:
+  scout: "0 */8 * * *"       # Every 8 hours
+  quill: "0 */2 * * *"       # Every 2 hours
+  sage: "0 8,14,20 * * *"    # 3x/day at 8am, 2pm, 8pm
+  ezra: "0 */4 * * *"        # Every 4 hours
+  herald: "0 10,18 * * *"    # 2x/day at 10am, 6pm
+  lurker: "0 */8 * * *"      # Every 8 hours
+  morgan: "0 7,13,19 * * *"  # 3x/day at 7am, 1pm, 7pm
