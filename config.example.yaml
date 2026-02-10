@@ -1,0 +1,99 @@
+# ClaimCoach Content Pipeline Configuration
+# Copy to config.yaml and fill in your API keys
+
+# Claude API (required)
+# Per-agent model assignments — optimized for cost (~$0.10-$0.25/article)
+# Haiku for most agents, Sonnet only where reasoning quality matters
+anthropic:
+  api_key: "sk-ant-..."
+  quill_model: "claude-haiku-4-5-20251001"     # Writer — Haiku is surprisingly good with tight prompts
+  sage_model: "claude-sonnet-4-5-20250929"     # Reviewer — needs stronger reasoning for quality gate
+  scout_model: "claude-haiku-4-5-20251001"     # Research — structured keyword processing
+  morgan_model: "claude-haiku-4-5-20251001"    # PM — pipeline monitoring is structured logic
+  herald_model: "claude-haiku-4-5-20251001"    # Social — lightweight post drafting
+  lurker_model: "claude-haiku-4-5-20251001"    # Community — Reddit scanning + response drafts
+
+# Blog publishing - Static files (deploy to Netlify/Vercel/GitHub Pages)
+blog:
+  output_dir: "./blog"
+  site_url: "https://claimcoach.app"
+
+# Keyword Research (Phase 2+)
+# Choose one: ahrefs or semrush
+ahrefs:
+  api_key: ""
+
+semrush:
+  api_key: ""
+
+# Plagiarism checking (Phase 2+)
+copyscape:
+  api_key: ""
+  username: ""
+
+# Social APIs (Phase 3+)
+reddit:
+  client_id: ""
+  client_secret: ""
+  username: ""
+  password: ""
+
+twitter:
+  api_key: ""
+  api_secret: ""
+  access_token: ""
+  access_token_secret: ""
+
+# Google Search Console (Phase 2+)
+google:
+  search_console_credentials: ""
+
+# Image generation (Phase 2+)
+openai:
+  api_key: ""
+
+# Pipeline settings
+pipeline:
+  database_path: "pipeline.db"
+  product_context_path: "PRODUCT_CONTEXT.md"
+  state_rules_path: "STATE_RULES.md"
+  blog_output_dir: "output/blog"
+  min_backlog_topics: 15
+  articles_per_week_target: 4
+  max_revision_rounds: 3
+  dashboard_url: "http://localhost:8000"  # Review dashboard URL (set to empty to disable notifications)
+
+# New agents (NextLevel features)
+atlas:
+  enabled: true
+  min_articles_for_analysis: 10
+  min_confidence_score: 0.7
+
+rival:
+  enabled: true
+  competitor_domains:
+    - "competitor1.com"
+    - "competitor2.com"
+  max_competitor_checks: 20
+
+remix:
+  enabled: true
+  remix_types:
+    - twitter
+    - linkedin
+    - email
+    - youtube
+  max_remixes_per_run: 3
+
+# Scheduling (cron expressions)
+schedule:
+  scout: "0 */8 * * *"       # Every 8 hours
+  quill: "0 */2 * * *"       # Every 2 hours
+  sage: "0 8,14,20 * * *"    # 3x/day at 8am, 2pm, 8pm
+  ezra: "0 */4 * * *"        # Every 4 hours
+  herald: "0 10,18 * * *"    # 2x/day at 10am, 6pm
+  lurker: "0 */8 * * *"      # Every 8 hours
+  morgan: "0 7,13,19 * * *"  # 3x/day at 7am, 1pm, 7pm
+  atlas: "0 6 * * 1"         # Weekly on Monday 6am
+  rival: "0 8 * * *"         # Daily at 8am
+  remix: "0 */6 * * *"       # Every 6 hours
