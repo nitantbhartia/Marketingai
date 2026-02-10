@@ -151,6 +151,93 @@ def init_database():
         db.execute("CREATE INDEX IF NOT EXISTS idx_agent_log_agent ON agent_log(agent_name)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_agent_log_created ON agent_log(created_at)")
 
+        # Performance insights (Atlas agent)
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS performance_insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                insight_type TEXT NOT NULL,
+                insight_text TEXT NOT NULL,
+                confidence_score REAL,
+                supporting_data TEXT,
+                applied BOOLEAN DEFAULT 0,
+                applied_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        db.execute("CREATE INDEX IF NOT EXISTS idx_insights_type ON performance_insights(insight_type)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_insights_applied ON performance_insights(applied)")
+
+        # Internal links tracking
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS internal_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_article_id INTEGER REFERENCES articles(id),
+                target_article_id INTEGER REFERENCES articles(id),
+                anchor_text TEXT,
+                link_quality_score REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        db.execute("CREATE INDEX IF NOT EXISTS idx_links_source ON internal_links(source_article_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_links_target ON internal_links(target_article_id)")
+
+        # Competitor tracking (Rival agent)
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS competitor_articles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                competitor_domain TEXT NOT NULL,
+                article_url TEXT UNIQUE NOT NULL,
+                title TEXT,
+                target_keyword TEXT,
+                word_count INTEGER,
+                detected_position INTEGER,
+                content_hash TEXT,
+                last_checked TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        db.execute("CREATE INDEX IF NOT EXISTS idx_competitor_domain ON competitor_articles(competitor_domain)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_competitor_keyword ON competitor_articles(target_keyword)")
+
+        # CTA variants and performance
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS cta_variants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                article_id INTEGER REFERENCES articles(id),
+                cta_text TEXT NOT NULL,
+                cta_type TEXT,
+                position TEXT,
+                impressions INTEGER DEFAULT 0,
+                clicks INTEGER DEFAULT 0,
+                conversions INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        db.execute("CREATE INDEX IF NOT EXISTS idx_cta_article ON cta_variants(article_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_cta_active ON cta_variants(is_active)")
+
+        # Content remixes (Remix agent)
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS content_remixes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_article_id INTEGER REFERENCES articles(id),
+                remix_type TEXT NOT NULL,
+                remix_content TEXT NOT NULL,
+                published_url TEXT,
+                published_at TIMESTAMP,
+                engagement_score REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        db.execute("CREATE INDEX IF NOT EXISTS idx_remix_source ON content_remixes(source_article_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_remix_type ON content_remixes(remix_type)")
+
 
 def claim_article(article_id: int, claim_field: str, claim_id: str) -> bool:
     """
@@ -252,3 +339,101 @@ def get_articles_by_status(status: str) -> List[sqlite3.Row]:
             (status,)
         )
         return cursor.fetchall()
+
+
+def release_claim(article_id: int, claim_field: str):
+    """Release a claim on an article."""
+    with get_db() as db:
+        db.execute(
+            f"UPDATE articles SET {claim_field} = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (article_id,)
+        )
+
+
+# Helper functions for new features
+
+def log_performance_insight(insight_type: str, insight_text: str, confidence_score: float, supporting_data: Dict[str, Any]):
+    """Log a performance insight discovered by Atlas."""
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO performance_insights (insight_type, insight_text, confidence_score, supporting_data) VALUES (?, ?, ?, ?)",
+            (insight_type, insight_text, confidence_score, json.dumps(supporting_data))
+        )
+
+
+def add_internal_link(source_article_id: int, target_article_id: int, anchor_text: str, quality_score: float):
+    """Add an internal link between articles."""
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO internal_links (source_article_id, target_article_id, anchor_text, link_quality_score) VALUES (?, ?, ?, ?)",
+            (source_article_id, target_article_id, anchor_text, quality_score)
+        )
+
+
+def get_internal_links_for_article(article_id: int) -> List[sqlite3.Row]:
+    """Get all internal links pointing to an article."""
+    with get_db() as db:
+        cursor = db.execute(
+            "SELECT * FROM internal_links WHERE target_article_id = ?",
+            (article_id,)
+        )
+        return cursor.fetchall()
+
+
+def log_competitor_article(domain: str, url: str, title: str, keyword: str, word_count: int, position: int, content_hash: str):
+    """Log a competitor article discovered by Rival."""
+    with get_db() as db:
+        db.execute(
+            """
+            INSERT OR REPLACE INTO competitor_articles
+            (competitor_domain, article_url, title, target_keyword, word_count, detected_position, content_hash, last_checked)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (domain, url, title, keyword, word_count, position, content_hash)
+        )
+
+
+def add_cta_variant(article_id: int, cta_text: str, cta_type: str, position: str):
+    """Add a CTA variant for an article."""
+    with get_db() as db:
+        cursor = db.execute(
+            "INSERT INTO cta_variants (article_id, cta_text, cta_type, position) VALUES (?, ?, ?, ?)",
+            (article_id, cta_text, cta_type, position)
+        )
+        return cursor.lastrowid
+
+
+def update_cta_metrics(cta_id: int, impressions: int = None, clicks: int = None, conversions: int = None):
+    """Update CTA performance metrics."""
+    with get_db() as db:
+        updates = []
+        params = []
+        if impressions is not None:
+            updates.append("impressions = impressions + ?")
+            params.append(impressions)
+        if clicks is not None:
+            updates.append("clicks = clicks + ?")
+            params.append(clicks)
+        if conversions is not None:
+            updates.append("conversions = conversions + ?")
+            params.append(conversions)
+
+        if updates:
+            params.append(cta_id)
+            db.execute(
+                f"UPDATE cta_variants SET {', '.join(updates)} WHERE id = ?",
+                tuple(params)
+            )
+
+
+def log_content_remix(source_article_id: int, remix_type: str, remix_content: str, published_url: str = None):
+    """Log a content remix created by Remix agent."""
+    with get_db() as db:
+        cursor = db.execute(
+            """
+            INSERT INTO content_remixes (source_article_id, remix_type, remix_content, published_url, published_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (source_article_id, remix_type, remix_content, published_url, datetime.now() if published_url else None)
+        )
+        return cursor.lastrowid

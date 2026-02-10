@@ -105,3 +105,36 @@ class BaseAgent(ABC):
         text = response.content[0].text
         self.logger.debug(f"Claude response length={len(text)}")
         return text
+
+
+class Agent:
+    """
+    Simple agent base class for agents that use direct database access.
+    Alternative to BaseAgent for simpler use cases.
+    """
+
+    def __init__(self, name: str, config: dict):
+        self.name = name
+        self.config = config
+        self.logger = logging.getLogger(f"pipeline.{name}")
+
+    def log(self, message: str, level: str = "info"):
+        """Log a message."""
+        if level == "info":
+            self.logger.info(message)
+        elif level == "error":
+            self.logger.error(message)
+        elif level == "warning":
+            self.logger.warning(message)
+        else:
+            self.logger.debug(message)
+
+    def _generate_claim_id(self) -> str:
+        """Generate unique claim ID."""
+        ts = int(time.time())
+        rand = uuid.uuid4().hex[:6]
+        return f"{self.name}-{ts}-{rand}"
+
+    def run(self) -> dict:
+        """Execute agent's main task. Override in subclass."""
+        raise NotImplementedError()

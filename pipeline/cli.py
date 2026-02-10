@@ -29,6 +29,38 @@ def get_config_and_db(config_path: str | None) -> tuple[Config, Database]:
     return cfg, db
 
 
+def _run_simple_agent(agent_name: str, cfg: Config) -> dict:
+    """Run agents that use simpler Agent base class."""
+    # Convert config to dict
+    config_dict = {
+        "anthropic_api_key": cfg.anthropic.api_key,
+        "blog_output_dir": cfg.blog.output_dir,
+        "site_url": cfg.blog.site_url,
+    }
+
+    if agent_name == "atlas":
+        from pipeline.agents.atlas import Atlas
+        agent = Atlas(config_dict)
+    elif agent_name == "rival":
+        from pipeline.agents.rival import Rival
+        config_dict["competitor_domains"] = getattr(cfg, "competitor_domains", [])
+        config_dict["target_keywords"] = getattr(cfg, "target_keywords", [])
+        agent = Rival(config_dict)
+    elif agent_name == "remix":
+        from pipeline.agents.remix import Remix
+        config_dict["remix_types"] = ["twitter", "linkedin", "email", "youtube"]
+        agent = Remix(config_dict)
+    else:
+        return {"status": "error", "error": f"Unknown agent: {agent_name}"}
+
+    try:
+        result = agent.run()
+        return result
+    except Exception as e:
+        logging.error(f"{agent_name} failed: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
 @click.group()
 @click.option("--config", "-c", default=None, help="Path to config.yaml")
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
@@ -45,7 +77,7 @@ def cli(ctx, config, verbose):
 
 @cli.command()
 @click.argument("agent_name", type=click.Choice(
-    ["scout", "quill", "sage", "ezra", "herald", "lurker", "morgan", "all"]
+    ["scout", "quill", "sage", "ezra", "herald", "lurker", "morgan", "atlas", "rival", "remix", "all"]
 ))
 @click.pass_context
 def run(ctx, agent_name):
@@ -54,8 +86,18 @@ def run(ctx, agent_name):
 
     cfg, db = get_config_and_db(ctx.obj["config_path"])
 
-    if agent_name == "all":
+    # New agents (atlas, rival, remix) use simpler pattern
+    if agent_name in ["atlas", "rival", "remix"]:
+        result = _run_simple_agent(agent_name, cfg)
+        click.echo(json.dumps(result, indent=2, default=str))
+    elif agent_name == "all":
         results = run_all_agents(cfg, db)
+        # Also run new agents
+        for name in ["atlas", "rival", "remix"]:
+            try:
+                results[name] = _run_simple_agent(name, cfg)
+            except Exception as e:
+                results[name] = {"status": "error", "error": str(e)}
         for name, result in results.items():
             status = result.get("status", "unknown")
             click.echo(f"  {name}: {status}")

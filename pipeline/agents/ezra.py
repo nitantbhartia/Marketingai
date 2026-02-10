@@ -16,6 +16,7 @@ from jinja2 import Template
 
 from pipeline.agents.base import Agent
 from pipeline.db import get_db, claim_article, release_claim
+from content_quality.db import add_cta_variant
 
 
 class Ezra(Agent):
@@ -114,8 +115,20 @@ class Ezra(Agent):
             # Save markdown file
             markdown_path = self._save_markdown(article, slug)
 
-            # Generate HTML file
-            html_path = self._generate_html(article, slug)
+            # Generate CTA variants
+            cta_variants = self._generate_cta_variants(article)
+
+            # Generate HTML file with CTAs
+            html_path = self._generate_html(article, slug, cta_variants)
+
+            # Save CTA variants to database for tracking
+            for cta in cta_variants:
+                add_cta_variant(
+                    article_id=article_id,
+                    cta_text=cta["text"],
+                    cta_type=cta["type"],
+                    position=cta["position"]
+                )
 
             # Update index
             self._update_index(article, slug)
@@ -192,7 +205,79 @@ class Ezra(Agent):
         self.log(f"  Saved markdown: {filepath}")
         return filepath
 
-    def _generate_html(self, article: Dict[str, Any], slug: str) -> Path:
+    def _generate_cta_variants(self, article: Dict[str, Any]) -> List[Dict[str, str]]:
+        """
+        Generate personalized CTA variants based on article content.
+
+        Returns list of CTA dicts with type, position, heading, text, button_text.
+        """
+        state = article.get("target_state", "")
+        keyword = article.get("target_keyword", "")
+
+        variants = []
+
+        # Primary CTA - State-specific if available
+        if state:
+            variants.append({
+                "type": "primary",
+                "position": "sidebar",
+                "heading": f"Get Your Free {state} Settlement Analysis",
+                "text": f"See if your {state} total loss offer is fair in under 5 minutes.",
+                "button_text": "Analyze Your Offer",
+                "button_url": "https://claimcoach.app"
+            })
+        else:
+            variants.append({
+                "type": "primary",
+                "position": "sidebar",
+                "heading": "Get Your Free Settlement Analysis",
+                "text": "Find out if your total loss offer is fair in under 5 minutes.",
+                "button_text": "Analyze Your Offer",
+                "button_url": "https://claimcoach.app"
+            })
+
+        # Secondary CTA - Content-aware
+        if "settlement" in keyword.lower():
+            variants.append({
+                "type": "secondary",
+                "position": "inline",
+                "heading": "Not Sure If Your Offer Is Fair?",
+                "text": "Our free calculator compares your offer to actual market values.",
+                "button_text": "Check Your Settlement",
+                "button_url": "https://claimcoach.app/calculator"
+            })
+        elif "total loss" in keyword.lower():
+            variants.append({
+                "type": "secondary",
+                "position": "inline",
+                "heading": "Declared a Total Loss?",
+                "text": "Get a detailed breakdown of what your vehicle is actually worth.",
+                "button_text": "Get Your Valuation",
+                "button_url": "https://claimcoach.app"
+            })
+        else:
+            variants.append({
+                "type": "secondary",
+                "position": "inline",
+                "heading": "Questions About Your Claim?",
+                "text": "Chat with our AI assistant trained on insurance regulations.",
+                "button_text": "Ask a Question",
+                "button_url": "https://claimcoach.app/chat"
+            })
+
+        # Bottom CTA - Newsletter signup
+        variants.append({
+            "type": "newsletter",
+            "position": "bottom",
+            "heading": "Insurance Tips in Your Inbox",
+            "text": "Get weekly tips on navigating total loss claims and maximizing settlements.",
+            "button_text": "Subscribe Free",
+            "button_url": "https://claimcoach.app/newsletter"
+        })
+
+        return variants
+
+    def _generate_html(self, article: Dict[str, Any], slug: str, cta_variants: List[Dict[str, str]]) -> Path:
         """Generate HTML from markdown."""
 
         # Convert markdown to HTML
@@ -201,7 +286,12 @@ class Ezra(Agent):
             extensions=['extra', 'codehilite', 'toc', 'fenced_code']
         )
 
-        # Simple HTML template
+        # Get CTA variants
+        primary_cta = next((c for c in cta_variants if c["type"] == "primary"), None)
+        secondary_cta = next((c for c in cta_variants if c["type"] == "secondary"), None)
+        newsletter_cta = next((c for c in cta_variants if c["type"] == "newsletter"), None)
+
+        # HTML template with dynamic CTAs
         template = Template("""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -224,16 +314,36 @@ class Ezra(Agent):
         <article>
             <h1>{{ title }}</h1>
             {{ content | safe }}
+
+            {% if secondary_cta %}
+            <div class="cta cta-inline">
+                <h3>{{ secondary_cta.heading }}</h3>
+                <p>{{ secondary_cta.text }}</p>
+                <a href="{{ secondary_cta.button_url }}" class="button">{{ secondary_cta.button_text }}</a>
+            </div>
+            {% endif %}
         </article>
 
         <aside>
-            <div class="cta">
-                <h3>Get Your Free Settlement Analysis</h3>
-                <p>Find out if your total loss offer is fair in under 5 minutes.</p>
-                <a href="https://claimcoach.app" class="button">Analyze Your Offer</a>
+            {% if primary_cta %}
+            <div class="cta cta-sidebar">
+                <h3>{{ primary_cta.heading }}</h3>
+                <p>{{ primary_cta.text }}</p>
+                <a href="{{ primary_cta.button_url }}" class="button button-primary">{{ primary_cta.button_text }}</a>
             </div>
+            {% endif %}
         </aside>
     </main>
+
+    {% if newsletter_cta %}
+    <section class="cta cta-newsletter">
+        <div class="container">
+            <h2>{{ newsletter_cta.heading }}</h2>
+            <p>{{ newsletter_cta.text }}</p>
+            <a href="{{ newsletter_cta.button_url }}" class="button">{{ newsletter_cta.button_text }}</a>
+        </div>
+    </section>
+    {% endif %}
 
     <footer>
         <p>&copy; {{ year }} ClaimCoach. All rights reserved.</p>
@@ -242,13 +352,16 @@ class Ezra(Agent):
 </html>
 """)
 
-        # Render HTML
+        # Render HTML with CTAs
         html = template.render(
             meta_title=article.get("meta_title") or article["title"],
             meta_description=article.get("meta_description", ""),
             target_keyword=article.get("target_keyword", ""),
             title=article["title"],
             content=html_content,
+            primary_cta=primary_cta,
+            secondary_cta=secondary_cta,
+            newsletter_cta=newsletter_cta,
             year=datetime.now().year
         )
 
