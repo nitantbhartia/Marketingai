@@ -5,9 +5,9 @@ This guide will help you set up and run the complete ClaimCoach Content Engine.
 ## Prerequisites
 
 - Python 3.10+
-- Ghost CMS instance (for publishing)
 - Anthropic API key
 - Google Search Console service account (for monitoring)
+- Static site host (Netlify/Vercel/GitHub Pages - optional)
 
 ## Quick Setup (5 minutes)
 
@@ -34,14 +34,12 @@ cat > .env << 'EOF'
 # Anthropic API (required for agents)
 ANTHROPIC_API_KEY=your-anthropic-api-key-here
 
-# Ghost CMS (required for publishing)
-GHOST_URL=https://claimcoach.app/blog
-GHOST_ADMIN_API_KEY=your-ghost-admin-key
-GHOST_CONTENT_API_KEY=your-ghost-content-key
+# Blog publishing (static files - deploy to Netlify/Vercel/GitHub Pages)
+BLOG_OUTPUT_DIR=./blog
+SITE_URL=https://claimcoach.app
 
 # Google Search Console (required for weekly monitoring)
 GSC_CREDENTIALS_JSON={"type":"service_account","project_id":"..."}
-SITE_URL=https://claimcoach.app
 
 # Database (optional - defaults shown)
 DATABASE_PATH=./data/claimcoach_content.db
@@ -407,16 +405,16 @@ python api_server.py &
 python -m pipeline.cli sage
 ```
 
-### Issue: "Ghost API authentication failed"
+### Issue: "Blog output directory not writable"
 
 **Solution:**
 ```bash
-# Verify Ghost keys are correct
-curl -H "Authorization: Ghost YOUR_ADMIN_KEY" \
-  https://claimcoach.app/blog/ghost/api/admin/posts/
+# Ensure blog directory exists and is writable
+mkdir -p ./blog/posts ./blog/html
+chmod 755 ./blog ./blog/posts ./blog/html
 
-# Check key format (should be hex:hex)
-echo $GHOST_ADMIN_API_KEY | grep -E '^[a-f0-9]{24}:[a-f0-9]{64}$'
+# Verify permissions
+ls -la ./blog
 ```
 
 ### Issue: "Agent claims article but doesn't process"

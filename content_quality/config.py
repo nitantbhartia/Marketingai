@@ -16,14 +16,12 @@ DATA_DIR.mkdir(exist_ok=True)
 # SQLite (local database — co-located on Railway)
 DATABASE_PATH = os.environ.get("DATABASE_PATH", str(DATA_DIR / "claimcoach_content.db"))
 
-# Ghost CMS
-GHOST_URL = os.environ.get("GHOST_URL", "https://claimcoach.app/blog")
-GHOST_ADMIN_API_KEY = os.environ.get("GHOST_ADMIN_API_KEY", "")
-GHOST_CONTENT_API_KEY = os.environ.get("GHOST_CONTENT_API_KEY", "")
+# Blog publishing (static files)
+BLOG_OUTPUT_DIR = os.environ.get("BLOG_OUTPUT_DIR", "./blog")
+SITE_URL = os.environ.get("SITE_URL", "https://claimcoach.app")
 
 # Google Search Console
 GOOGLE_SEARCH_CONSOLE_CREDENTIALS = os.environ.get("GSC_CREDENTIALS_JSON", "")
-SITE_URL = os.environ.get("SITE_URL", "https://claimcoach.app")
 
 # Reference docs (mounted or stored in repo)
 PRODUCT_CONTEXT_PATH = str(REFERENCE_DIR / "PRODUCT_CONTEXT.md")

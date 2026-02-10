@@ -13,17 +13,10 @@ anthropic:
   herald_model: "claude-haiku-4-5-20251001"    # Social — lightweight post drafting
   lurker_model: "claude-haiku-4-5-20251001"    # Community — Reddit scanning + response drafts
 
-# Blog CMS - Ghost (Phase 2+)
-ghost:
-  url: "https://claimcoach.app"
-  admin_api_key: ""
-  content_api_key: ""
-
-# Blog CMS - WordPress alternative (Phase 2+)
-wordpress:
-  url: ""
-  username: ""
-  app_password: ""
+# Blog publishing - Static files (deploy to Netlify/Vercel/GitHub Pages)
+blog:
+  output_dir: "./blog"
+  site_url: "https://claimcoach.app"
 
 # Keyword Research (Phase 2+)
 # Choose one: ahrefs or semrush

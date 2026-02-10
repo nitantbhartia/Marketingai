@@ -28,17 +28,10 @@ class AnthropicConfig:
 
 
 @dataclass
-class GhostConfig:
-    url: str = ""
-    admin_api_key: str = ""
-    content_api_key: str = ""
-
-
-@dataclass
-class WordPressConfig:
-    url: str = ""
-    username: str = ""
-    app_password: str = ""
+class BlogConfig:
+    """Static blog publishing configuration."""
+    output_dir: str = "./blog"
+    site_url: str = "https://claimcoach.app"
 
 
 @dataclass
@@ -88,8 +81,7 @@ class ScheduleConfig:
 @dataclass
 class Config:
     anthropic: AnthropicConfig = field(default_factory=AnthropicConfig)
-    ghost: GhostConfig = field(default_factory=GhostConfig)
-    wordpress: WordPressConfig = field(default_factory=WordPressConfig)
+    blog: BlogConfig = field(default_factory=BlogConfig)
     copyscape: CopyscapeConfig = field(default_factory=CopyscapeConfig)
     reddit: RedditConfig = field(default_factory=RedditConfig)
     twitter: TwitterConfig = field(default_factory=TwitterConfig)
@@ -117,8 +109,11 @@ class Config:
         cfg.anthropic.api_key = (
             os.environ.get("ANTHROPIC_API_KEY") or cfg.anthropic.api_key
         )
-        cfg.ghost.admin_api_key = (
-            os.environ.get("GHOST_ADMIN_API_KEY") or cfg.ghost.admin_api_key
+        cfg.blog.output_dir = (
+            os.environ.get("BLOG_OUTPUT_DIR") or cfg.blog.output_dir
+        )
+        cfg.blog.site_url = (
+            os.environ.get("SITE_URL") or cfg.blog.site_url
         )
         cfg.copyscape.api_key = (
             os.environ.get("COPYSCAPE_API_KEY") or cfg.copyscape.api_key
@@ -139,8 +134,7 @@ class Config:
         """Apply a raw config dict to dataclass fields."""
         section_map = {
             "anthropic": self.anthropic,
-            "ghost": self.ghost,
-            "wordpress": self.wordpress,
+            "blog": self.blog,
             "copyscape": self.copyscape,
             "reddit": self.reddit,
             "twitter": self.twitter,

@@ -66,7 +66,7 @@ def init_database():
                 revision_notes TEXT,
 
                 -- Publishing
-                ghost_post_id TEXT,
+                ghost_post_id TEXT,  -- Deprecated: kept for backward compatibility
                 published_url TEXT,
                 published_at TIMESTAMP,
                 social_status TEXT,

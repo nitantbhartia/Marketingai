@@ -45,9 +45,7 @@ The ClaimCoach Content Quality system can be deployed to Railway in two ways:
    In Railway dashboard → Variables:
    ```bash
    # Required
-   GHOST_URL=https://claimcoach.app/blog
-   GHOST_ADMIN_API_KEY=your-admin-api-key-here
-   GHOST_CONTENT_API_KEY=your-content-api-key-here
+   BLOG_OUTPUT_DIR=/data/blog
    SITE_URL=https://claimcoach.app
 
    # Google Search Console (JSON as single-line string)
@@ -213,19 +211,57 @@ If sharing SQLite volumes between services is problematic:
 
 ---
 
-## Getting Railway API Keys from Ghost
+## Deploying Static Blog Files
 
-### Ghost Admin API Key
+The Ezra agent publishes articles as static files (markdown + HTML) to the `/data/blog` directory. You can deploy these files to any static hosting platform:
 
-1. Ghost Admin → Settings → Integrations
-2. Click "Add custom integration"
-3. Name: "ClaimCoach Content Quality"
-4. Copy the **Admin API Key**
+### Option 1: Netlify
 
-### Ghost Content API Key
+1. **Install Netlify CLI**
+   ```bash
+   npm install -g netlify-cli
+   ```
 
-1. Same integration as above
-2. Copy the **Content API Key**
+2. **Deploy blog directory**
+   ```bash
+   cd /data/blog
+   netlify deploy --prod --dir=.
+   ```
+
+3. **Or set up continuous deployment**
+   - Connect your GitHub repo to Netlify
+   - Build command: (none - files are pre-generated)
+   - Publish directory: `blog/`
+
+### Option 2: Vercel
+
+1. **Install Vercel CLI**
+   ```bash
+   npm install -g vercel
+   ```
+
+2. **Deploy blog directory**
+   ```bash
+   cd /data/blog
+   vercel --prod
+   ```
+
+### Option 3: GitHub Pages
+
+1. **Add to repository**
+   ```bash
+   git add blog/
+   git commit -m "Add published blog posts"
+   git push origin main
+   ```
+
+2. **Enable GitHub Pages**
+   - Repository Settings → Pages
+   - Source: Deploy from branch
+   - Branch: main → /blog folder
+   - Save
+
+Your blog will be live at: `https://your-username.github.io/your-repo/`
 
 ---
 
@@ -320,21 +356,16 @@ Free tier: 100 requests/day. Each report uses ~2-5 requests.
 - Weekly runs: well within limits
 - If exceeded: space out requests with `time.sleep(1)` between calls
 
-### Ghost API Rate Limits
+### Blog Output Directory Not Writable
 
-Ghost.org hosted: 500 requests/hour
-Self-hosted: usually unlimited
+If Ezra fails to publish:
+```bash
+# Ensure blog directory exists and is writable
+railway run mkdir -p /data/blog/posts /data/blog/html
+railway run chmod 755 /data/blog
 
-If rate limited:
-```python
-# Add retry logic with exponential backoff
-import time
-for attempt in range(3):
-    try:
-        response = ghost_client.get_posts()
-        break
-    except RateLimitError:
-        time.sleep(2 ** attempt)
+# Check permissions
+railway run ls -la /data/blog
 ```
 
 ---
@@ -456,7 +487,8 @@ with get_db() as db:
    - Draft article in SQLite
    - Call `/validate/all`
    - Review `revision_notes`
-   - Publish to Ghost (via Ezra agent)
+   - Publish to static files (via Ezra agent)
+   - Deploy blog directory to Netlify/Vercel/GitHub Pages
 
 4. **Monitor First Week**
    - Check cron jobs run on Monday
@@ -470,7 +502,9 @@ with get_db() as db:
 
 - Railway Docs: https://docs.railway.app/
 - Railway Discord: https://discord.gg/railway
-- Ghost API Docs: https://ghost.org/docs/admin-api/
+- Netlify Docs: https://docs.netlify.com/
+- Vercel Docs: https://vercel.com/docs
+- GitHub Pages Docs: https://docs.github.com/pages
 - GSC API Docs: https://developers.google.com/webmaster-tools/
 
 ---

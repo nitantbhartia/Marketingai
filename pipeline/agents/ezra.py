@@ -1,348 +1,303 @@
-"""Ezra agent — publisher.
+"""
+Ezra - Publisher Agent
 
-Takes approved articles and publishes them to the blog CMS (Ghost or WordPress),
-generates featured images, adds schema markup, and submits to Google Search Console.
+Publishes approved articles to static files (markdown/HTML).
+No CMS needed - deploys to any static host (Netlify, Vercel, GitHub Pages).
 """
 
-from __future__ import annotations
-
-import json
-import logging
 import os
-import re
-from datetime import datetime, timezone
+import json
+import shutil
+from datetime import datetime
 from pathlib import Path
-from typing import Any
-
+from typing import Optional, Dict, Any
+import markdown
 from jinja2 import Template
 
-from pipeline.agents.base import BaseAgent
-from pipeline.db import ArticleStatus
-from pipeline.utils.seo import generate_slug
+from pipeline.agents.base import Agent
+from pipeline.db import get_db, claim_article, release_claim
 
-logger = logging.getLogger(__name__)
 
-# HTML article template
-ARTICLE_HTML_TEMPLATE = """<!DOCTYPE html>
+class Ezra(Agent):
+    """
+    Publisher agent - publishes articles to static files.
+
+    Workflow:
+    1. Claims article with status='ready_to_publish'
+    2. Saves markdown to blog/ directory
+    3. Generates HTML from markdown
+    4. Updates metadata (published_url, published_at)
+    5. Updates status to 'done'
+    """
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(name="ezra", config=config)
+        self.blog_dir = Path(config.get("blog_output_dir", "./blog"))
+        self.site_url = config.get("site_url", "https://claimcoach.app")
+
+        # Create blog directories
+        self.blog_dir.mkdir(exist_ok=True)
+        (self.blog_dir / "posts").mkdir(exist_ok=True)
+        (self.blog_dir / "html").mkdir(exist_ok=True)
+
+    def run(self) -> Dict[str, Any]:
+        """Find and publish ready articles."""
+
+        self.log("Looking for articles to publish...")
+
+        # Get articles ready to publish
+        with get_db() as db:
+            cursor = db.execute("""
+                SELECT id, title, slug, markdown_content, meta_title,
+                       meta_description, target_keyword, target_state
+                FROM articles
+                WHERE status = 'ready_to_publish'
+                AND (publisher_claim IS NULL OR publisher_claim = '')
+                ORDER BY updated_at ASC
+                LIMIT ?
+            """, (self.config.get("max_publishes_per_run", 2),))
+
+            articles = [dict(row) for row in cursor.fetchall()]
+
+        if not articles:
+            self.log("No articles ready to publish")
+            return {"published": 0, "skipped": 0, "failed": 0}
+
+        self.log(f"Found {len(articles)} articles to publish")
+
+        results = {
+            "published": 0,
+            "skipped": 0,
+            "failed": 0,
+            "articles": []
+        }
+
+        for article in articles:
+            try:
+                result = self._publish_article(article)
+                if result["success"]:
+                    results["published"] += 1
+                else:
+                    results["failed"] += 1
+                results["articles"].append(result)
+            except Exception as e:
+                self.log(f"Error publishing article {article['id']}: {e}", level="error")
+                results["failed"] += 1
+                results["articles"].append({
+                    "article_id": article["id"],
+                    "success": False,
+                    "error": str(e)
+                })
+
+        return results
+
+    def _publish_article(self, article: Dict[str, Any]) -> Dict[str, Any]:
+        """Publish single article to static files."""
+
+        article_id = article["id"]
+
+        # Claim article
+        claim_id = self._generate_claim_id()
+        if not claim_article(article_id, "publisher_claim", claim_id):
+            return {
+                "article_id": article_id,
+                "success": False,
+                "error": "Could not claim article"
+            }
+
+        self.log(f"Publishing: {article['title']}")
+
+        try:
+            # Generate slug if not set
+            slug = article.get("slug") or self._slugify(article["title"])
+
+            # Save markdown file
+            markdown_path = self._save_markdown(article, slug)
+
+            # Generate HTML file
+            html_path = self._generate_html(article, slug)
+
+            # Update index
+            self._update_index(article, slug)
+
+            # Determine URL
+            published_url = f"{self.site_url}/blog/{slug}"
+
+            # Update database
+            with get_db() as db:
+                db.execute("""
+                    UPDATE articles SET
+                        slug = ?,
+                        published_url = ?,
+                        published_at = CURRENT_TIMESTAMP,
+                        status = 'done',
+                        publisher_claim = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (slug, published_url, article_id))
+
+            self.log(f"✓ Published: {published_url}")
+
+            # Log to agent_log
+            from pipeline.db import log_agent_action
+            log_agent_action(
+                agent_name=self.name,
+                action="published",
+                article_id=article_id,
+                details={
+                    "slug": slug,
+                    "url": published_url,
+                    "markdown_path": str(markdown_path),
+                    "html_path": str(html_path)
+                }
+            )
+
+            return {
+                "article_id": article_id,
+                "success": True,
+                "slug": slug,
+                "url": published_url,
+                "markdown_path": str(markdown_path),
+                "html_path": str(html_path)
+            }
+
+        except Exception as e:
+            # Release claim on error
+            release_claim(article_id, "publisher_claim")
+            raise
+
+    def _save_markdown(self, article: Dict[str, Any], slug: str) -> Path:
+        """Save article as markdown file."""
+
+        # Create frontmatter
+        frontmatter = {
+            "title": article.get("meta_title") or article["title"],
+            "description": article.get("meta_description", ""),
+            "keyword": article.get("target_keyword", ""),
+            "state": article.get("target_state"),
+            "slug": slug,
+            "date": datetime.now().isoformat(),
+        }
+
+        # Build markdown with frontmatter
+        content = "---\n"
+        content += json.dumps(frontmatter, indent=2)
+        content += "\n---\n\n"
+        content += article["markdown_content"]
+
+        # Save to file
+        filepath = self.blog_dir / "posts" / f"{slug}.md"
+        filepath.write_text(content, encoding="utf-8")
+
+        self.log(f"  Saved markdown: {filepath}")
+        return filepath
+
+    def _generate_html(self, article: Dict[str, Any], slug: str) -> Path:
+        """Generate HTML from markdown."""
+
+        # Convert markdown to HTML
+        html_content = markdown.markdown(
+            article["markdown_content"],
+            extensions=['extra', 'codehilite', 'toc', 'fenced_code']
+        )
+
+        # Simple HTML template
+        template = Template("""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title }} | ClaimCoach Blog</title>
+    <title>{{ meta_title }}</title>
     <meta name="description" content="{{ meta_description }}">
-    <link rel="canonical" href="https://claimcoach.app/blog/{{ slug }}">
-
-    <!-- Schema.org Article markup -->
-    <script type="application/ld+json">
-    {
-        "@context": "https://schema.org",
-        "@type": "Article",
-        "headline": "{{ title }}",
-        "description": "{{ meta_description }}",
-        "author": {
-            "@type": "Organization",
-            "name": "ClaimCoach"
-        },
-        "publisher": {
-            "@type": "Organization",
-            "name": "ClaimCoach",
-            "url": "https://claimcoach.app"
-        },
-        "datePublished": "{{ published_date }}",
-        "mainEntityOfPage": "https://claimcoach.app/blog/{{ slug }}"
-    }
-    </script>
-
-    {% if faq_items %}
-    <!-- Schema.org FAQ markup -->
-    <script type="application/ld+json">
-    {
-        "@context": "https://schema.org",
-        "@type": "FAQPage",
-        "mainEntity": [
-            {% for item in faq_items %}
-            {
-                "@type": "Question",
-                "name": "{{ item.question }}",
-                "acceptedAnswer": {
-                    "@type": "Answer",
-                    "text": "{{ item.answer }}"
-                }
-            }{% if not loop.last %},{% endif %}
-            {% endfor %}
-        ]
-    }
-    </script>
-    {% endif %}
-
-    <!-- BreadcrumbList markup -->
-    <script type="application/ld+json">
-    {
-        "@context": "https://schema.org",
-        "@type": "BreadcrumbList",
-        "itemListElement": [
-            {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://claimcoach.app"},
-            {"@type": "ListItem", "position": 2, "name": "Blog", "item": "https://claimcoach.app/blog"},
-            {"@type": "ListItem", "position": 3, "name": "{{ title }}", "item": "https://claimcoach.app/blog/{{ slug }}"}
-        ]
-    }
-    </script>
+    <meta name="keywords" content="{{ target_keyword }}">
+    <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-<article>
-{{ content_html }}
-</article>
+    <header>
+        <nav>
+            <a href="/">ClaimCoach</a>
+            <a href="/blog">Blog</a>
+        </nav>
+    </header>
+
+    <main>
+        <article>
+            <h1>{{ title }}</h1>
+            {{ content | safe }}
+        </article>
+
+        <aside>
+            <div class="cta">
+                <h3>Get Your Free Settlement Analysis</h3>
+                <p>Find out if your total loss offer is fair in under 5 minutes.</p>
+                <a href="https://claimcoach.app" class="button">Analyze Your Offer</a>
+            </div>
+        </aside>
+    </main>
+
+    <footer>
+        <p>&copy; {{ year }} ClaimCoach. All rights reserved.</p>
+    </footer>
 </body>
 </html>
-"""
+""")
 
-
-class EzraAgent(BaseAgent):
-    name = "ezra"
-    claim_field = "publisher_claim"
-
-    def run(self) -> dict[str, Any]:
-        """Publish all articles in 'ready_to_publish' status."""
-        articles = self.db.query_articles(
-            status=ArticleStatus.READY_TO_PUBLISH.value, limit=10
+        # Render HTML
+        html = template.render(
+            meta_title=article.get("meta_title") or article["title"],
+            meta_description=article.get("meta_description", ""),
+            target_keyword=article.get("target_keyword", ""),
+            title=article["title"],
+            content=html_content,
+            year=datetime.now().year
         )
-        if not articles:
-            logger.info("No articles ready to publish")
-            return {"status": "idle", "published": 0}
 
-        published = []
-        for article in articles:
-            claim_id = self.generate_claim_id()
-            if not self.db.try_claim(
-                article.id, "publisher_claim", claim_id,
-                ArticleStatus.READY_TO_PUBLISH.value,
-            ):
-                continue
+        # Save HTML file
+        filepath = self.blog_dir / "html" / f"{slug}.html"
+        filepath.write_text(html, encoding="utf-8")
 
-            result = self._publish_article(article)
-            if result:
-                published.append(result)
+        self.log(f"  Generated HTML: {filepath}")
+        return filepath
 
-        self.db.record_metric("ezra_run", len(published))
-        logger.info(f"Ezra published {len(published)} articles")
-        return {"status": "success", "published": len(published), "articles": published}
+    def _update_index(self, article: Dict[str, Any], slug: str):
+        """Update blog index with new article."""
 
-    def _publish_article(self, article) -> dict | None:
-        """Publish a single article."""
-        try:
-            slug = article.slug or generate_slug(article.title)
-            now = datetime.now(timezone.utc)
+        index_path = self.blog_dir / "index.json"
 
-            # Convert markdown to HTML
-            content_html = self._markdown_to_html(article.content)
+        # Load existing index
+        if index_path.exists():
+            index = json.loads(index_path.read_text())
+        else:
+            index = {"articles": []}
 
-            # Extract FAQ items for schema markup
-            faq_items = self._extract_faq(article.content)
+        # Add new article to index
+        index["articles"].insert(0, {
+            "title": article.get("meta_title") or article["title"],
+            "description": article.get("meta_description", ""),
+            "slug": slug,
+            "url": f"/blog/{slug}",
+            "keyword": article.get("target_keyword", ""),
+            "state": article.get("target_state"),
+            "published_at": datetime.now().isoformat(),
+        })
 
-            # Generate the full HTML page
-            template = Template(ARTICLE_HTML_TEMPLATE)
-            html = template.render(
-                title=article.title,
-                meta_description=article.meta_description,
-                slug=slug,
-                published_date=now.strftime("%Y-%m-%d"),
-                content_html=content_html,
-                faq_items=faq_items,
-            )
+        # Save index
+        index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
 
-            published_url = f"https://claimcoach.app/blog/{slug}"
+        self.log(f"  Updated index: {index_path}")
 
-            # Try CMS publishing first
-            cms_published = False
+    def _slugify(self, text: str) -> str:
+        """Convert text to URL-friendly slug."""
+        import re
 
-            # Ghost CMS
-            if self.config.ghost.url and self.config.ghost.admin_api_key:
-                cms_published = self._publish_to_ghost(article, slug, content_html)
+        # Convert to lowercase
+        text = text.lower()
 
-            # WordPress fallback
-            if not cms_published and self.config.wordpress.url:
-                cms_published = self._publish_to_wordpress(article, slug, content_html)
+        # Replace spaces and special chars with hyphens
+        text = re.sub(r'[^\w\s-]', '', text)
+        text = re.sub(r'[-\s]+', '-', text)
 
-            # Always save static HTML locally
-            output_dir = self.config.resolve_path(self.config.pipeline.blog_output_dir)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"{slug}.html"
-            output_path.write_text(html)
-            logger.info(f"Saved static HTML: {output_path}")
+        # Remove leading/trailing hyphens
+        text = text.strip('-')
 
-            # Also save raw markdown
-            md_path = output_dir / f"{slug}.md"
-            md_path.write_text(
-                f"---\n"
-                f"title: \"{article.title}\"\n"
-                f"slug: {slug}\n"
-                f"keyword: \"{article.keyword}\"\n"
-                f"meta_description: \"{article.meta_description}\"\n"
-                f"date: {now.strftime('%Y-%m-%d')}\n"
-                f"---\n\n"
-                f"{article.content}"
-            )
-
-            # Update article status
-            self.db.update_article(
-                article.id,
-                status=ArticleStatus.DONE.value,
-                published_url=published_url,
-                published_at=now.isoformat(),
-                slug=slug,
-            )
-
-            # Submit to Google Search Console if configured
-            self._submit_to_search_console(published_url)
-
-            logger.info(f"Published: {article.title} -> {published_url}")
-            return {
-                "article_id": article.id,
-                "title": article.title,
-                "url": published_url,
-                "cms_published": cms_published,
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to publish {article.id}: {e}")
-            # Release the article back
-            self.db.update_article(
-                article.id,
-                status=ArticleStatus.READY_TO_PUBLISH.value,
-                publisher_claim="",
-            )
-            return None
-
-    def _markdown_to_html(self, md_content: str) -> str:
-        """Convert markdown content to HTML."""
-        import markdown
-
-        html = markdown.markdown(
-            md_content,
-            extensions=["tables", "fenced_code", "toc"],
-        )
-        return html
-
-    def _extract_faq(self, content: str) -> list[dict]:
-        """Extract FAQ questions and answers from markdown content."""
-        faq_items = []
-
-        # Find FAQ section
-        faq_match = re.search(
-            r"(?i)##\s*(?:FAQ|Frequently Asked Questions)(.*?)(?=\n##\s|\Z)",
-            content,
-            re.DOTALL,
-        )
-        if not faq_match:
-            return faq_items
-
-        faq_text = faq_match.group(1)
-
-        # Parse Q&A pairs (### Question format or **Question** format)
-        patterns = [
-            # ### Question\nAnswer
-            re.compile(r"###\s*(.+?)\n((?:(?!###).)+)", re.DOTALL),
-            # **Q: Question**\nAnswer
-            re.compile(r"\*\*(?:Q:\s*)?(.+?)\*\*\n((?:(?!\*\*).)+)", re.DOTALL),
-        ]
-
-        for pattern in patterns:
-            matches = pattern.findall(faq_text)
-            for q, a in matches:
-                q = q.strip().rstrip("?") + "?"
-                a = a.strip()
-                # Clean markdown from answer
-                a = re.sub(r"[*_`]", "", a)
-                a = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", a)
-                if q and a:
-                    faq_items.append({"question": q, "answer": a[:500]})
-
-        return faq_items[:5]  # Max 5 FAQ items
-
-    def _publish_to_ghost(self, article, slug: str, html: str) -> bool:
-        """Publish to Ghost CMS via Admin API."""
-        try:
-            import requests
-            import jwt
-            import time
-
-            # Ghost Admin API JWT
-            key_parts = self.config.ghost.admin_api_key.split(":")
-            if len(key_parts) != 2:
-                logger.warning("Invalid Ghost admin API key format")
-                return False
-
-            api_id, api_secret = key_parts
-            iat = int(time.time())
-            header = {"alg": "HS256", "typ": "JWT", "kid": api_id}
-            payload = {"iat": iat, "exp": iat + 300, "aud": "/admin/"}
-            token = jwt.encode(payload, bytes.fromhex(api_secret), algorithm="HS256", headers=header)
-
-            url = f"{self.config.ghost.url}/ghost/api/admin/posts/"
-            headers = {"Authorization": f"Ghost {token}"}
-            data = {
-                "posts": [{
-                    "title": article.title,
-                    "slug": slug,
-                    "html": html,
-                    "meta_description": article.meta_description,
-                    "status": "published",
-                    "tags": [{"name": article.content_category or "insurance"}],
-                }]
-            }
-
-            resp = requests.post(url, json=data, headers=headers, timeout=30)
-            if resp.status_code in (200, 201):
-                logger.info(f"Published to Ghost: {slug}")
-                return True
-            else:
-                logger.warning(f"Ghost publish failed: {resp.status_code} {resp.text[:200]}")
-                return False
-        except ImportError:
-            logger.warning("PyJWT not installed — Ghost publishing unavailable")
-            return False
-        except Exception as e:
-            logger.warning(f"Ghost publish error: {e}")
-            return False
-
-    def _publish_to_wordpress(self, article, slug: str, html: str) -> bool:
-        """Publish to WordPress via REST API."""
-        try:
-            import requests
-
-            url = f"{self.config.wordpress.url}/wp-json/wp/v2/posts"
-            auth = (self.config.wordpress.username, self.config.wordpress.app_password)
-            data = {
-                "title": article.title,
-                "slug": slug,
-                "content": html,
-                "excerpt": article.meta_description,
-                "status": "publish",
-            }
-
-            resp = requests.post(url, json=data, auth=auth, timeout=30)
-            if resp.status_code in (200, 201):
-                logger.info(f"Published to WordPress: {slug}")
-                return True
-            else:
-                logger.warning(f"WordPress publish failed: {resp.status_code}")
-                return False
-        except Exception as e:
-            logger.warning(f"WordPress publish error: {e}")
-            return False
-
-    def _submit_to_search_console(self, url: str) -> None:
-        """Submit URL to Google Search Console for indexing."""
-        if not self.config.google.search_console_credentials if hasattr(self.config, 'google') else True:
-            return
-
-        try:
-            import requests
-
-            # Google Indexing API
-            api_url = "https://indexing.googleapis.com/v3/urlNotifications:publish"
-            data = {"url": url, "type": "URL_UPDATED"}
-            # Would need OAuth2 credentials in production
-            logger.info(f"Search Console submission queued: {url}")
-        except Exception as e:
-            logger.debug(f"Search Console submission skipped: {e}")
+        return text[:50]  # Limit length

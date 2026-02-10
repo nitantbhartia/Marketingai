@@ -11,7 +11,7 @@ A **complete, production-ready autonomous content marketing system** with:
 | **Scout** | Discovers topics via keyword research | `pipeline/agents/scout.py` (9.8KB) |
 | **Quill** | Writes articles using Claude API | `pipeline/agents/quill.py` (9.0KB) |
 | **Sage** | Reviews quality via validation API | `pipeline/agents/sage.py` (16KB) |
-| **Ezra** | Publishes to Ghost CMS | `pipeline/agents/ezra.py` (12KB) |
+| **Ezra** | Publishes to static files | `pipeline/agents/ezra.py` (12KB) |
 | **Herald** | Promotes on social media | `pipeline/agents/herald.py` (11KB) |
 | **Lurker** | Scans Reddit for opportunities | `pipeline/agents/lurker.py` (9.8KB) |
 | **Morgan** | Orchestrates & monitors | `pipeline/agents/morgan.py` (10KB) |
@@ -56,7 +56,7 @@ A **complete, production-ready autonomous content marketing system** with:
 2. **Write** — Quill generates 1800-2200 word SEO articles
 3. **Validate** — Sage checks 6 quality dimensions
 4. **Revise** — Quill automatically fixes validation failures
-5. **Publish** — Ezra publishes to Ghost + Google
+5. **Publish** — Ezra publishes to static files (markdown + HTML)
 6. **Promote** — Herald shares on Reddit/Twitter
 7. **Monitor** — Weekly GSC analysis + health checks
 8. **Optimize** — Morgan identifies refresh opportunities
@@ -219,7 +219,7 @@ After setup:
 - ✅ Quality validators working
 - ✅ CLI commands functional
 - ⚠️ API keys needed (edit .env)
-- ⚠️ Ghost CMS config needed
+- ⚠️ Blog output directory config needed
 
 ## Key Files to Configure
 

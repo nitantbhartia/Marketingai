@@ -34,9 +34,6 @@ jinja2>=3.1.0
 schedule>=1.2.0
 apscheduler>=3.10.0
 
-# Ghost CMS SDK (unofficial)
-ghost-client>=0.0.2
-
 # SQLite is built into Python - no dependency needed
 
 # Development tools (optional)

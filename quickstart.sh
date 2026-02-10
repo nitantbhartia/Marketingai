@@ -48,10 +48,10 @@ echo ""
 
 # Check environment variables
 echo "7. Checking environment variables..."
-if [ -z "$GHOST_URL" ]; then
-    echo "⚠ GHOST_URL not set (optional for testing)"
+if [ -z "$BLOG_OUTPUT_DIR" ]; then
+    echo "⚠ BLOG_OUTPUT_DIR not set (optional for testing)"
 else
-    echo "✓ GHOST_URL set"
+    echo "✓ BLOG_OUTPUT_DIR set"
 fi
 
 if [ -z "$GSC_CREDENTIALS_JSON" ]; then
@@ -68,9 +68,8 @@ echo ""
 echo "Next steps:"
 echo ""
 echo "  1. Set environment variables (if not already set):"
-echo "     export GHOST_URL='https://claimcoach.app/blog'"
-echo "     export GHOST_ADMIN_API_KEY='your-key'"
-echo "     export GHOST_CONTENT_API_KEY='your-key'"
+echo "     export BLOG_OUTPUT_DIR='./blog'"
+echo "     export SITE_URL='https://claimcoach.app'"
 echo "     export GSC_CREDENTIALS_JSON='{...}'"
 echo ""
 echo "  2. Start the API server:"

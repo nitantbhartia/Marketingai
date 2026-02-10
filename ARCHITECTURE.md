@@ -29,7 +29,7 @@ This repository contains the **Content Quality & SEO Automation** subsystem of t
 │                     INFRASTRUCTURE (Railway)                         │
 │                                                                     │
 │   SQLite ◄──── all agents read/write                                │
-│   Ghost  ◄──── Ezra publishes here                                 │
+│   Blog/  ◄──── Ezra publishes static files (markdown + HTML)       │
 │   FastAPI ◄─── quality validation API server                        │
 │   Cron jobs ── agent scheduling                                     │
 └─────────────────────────────────────────────────────────────────────┘
@@ -133,7 +133,7 @@ claimcoach-content-quality/
 
 5. Ezra (external)
    ├─► Reads article from SQLite (status: 'ready_to_publish')
-   ├─► Publishes to Ghost CMS
+   ├─► Publishes to static files (markdown + HTML)
    ├─► Submits to Google Search Console
    └─► Updates SQLite (status: 'done', published_url, published_at)
 
@@ -215,7 +215,6 @@ CREATE TABLE articles (
     revision_notes TEXT,                  -- Instructions for Quill
 
     -- Publishing
-    ghost_post_id TEXT,
     published_url TEXT,
     published_at TIMESTAMP,
     social_status TEXT,                   -- NULL | amplified
@@ -363,14 +362,12 @@ See `agents/integration_examples/` for complete examples.
 ### Required
 
 ```bash
-# Ghost CMS
-GHOST_URL=https://claimcoach.app/blog
-GHOST_ADMIN_API_KEY=your-admin-api-key
-GHOST_CONTENT_API_KEY=your-content-api-key
+# Blog publishing (static files)
+BLOG_OUTPUT_DIR=./blog
+SITE_URL=https://claimcoach.app
 
 # Google Search Console
 GSC_CREDENTIALS_JSON={"type":"service_account",...}
-SITE_URL=https://claimcoach.app
 
 # Database
 DATABASE_PATH=/data/claimcoach_content.db
@@ -559,7 +556,7 @@ SELECT COUNT(*) FROM gsc_snapshots WHERE snapshot_date = DATE('now', '-7 days');
 - Regular backups via Railway volume snapshots
 
 ### API Keys
-- Ghost and GSC credentials stored as Railway env vars
+- GSC credentials stored as Railway env vars
 - Never committed to git (.gitignore includes .env)
 - Rotated quarterly (recommended)
 

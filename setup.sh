@@ -82,10 +82,10 @@ if [ -f ".env" ]; then
         warning "ANTHROPIC_API_KEY not set in .env"
     fi
 
-    if grep -q "GHOST_URL=" .env && [ -n "$(grep GHOST_URL= .env | cut -d= -f2)" ]; then
-        success "GHOST_URL configured"
+    if grep -q "BLOG_OUTPUT_DIR=" .env && [ -n "$(grep BLOG_OUTPUT_DIR= .env | cut -d= -f2)" ]; then
+        success "BLOG_OUTPUT_DIR configured"
     else
-        warning "GHOST_URL not set in .env"
+        warning "BLOG_OUTPUT_DIR not set in .env"
     fi
 else
     warning ".env file not found"
@@ -95,14 +95,12 @@ else
 # Anthropic API (required for agents)
 ANTHROPIC_API_KEY=your-anthropic-api-key-here
 
-# Ghost CMS (required for publishing)
-GHOST_URL=https://claimcoach.app/blog
-GHOST_ADMIN_API_KEY=your-ghost-admin-key
-GHOST_CONTENT_API_KEY=your-ghost-content-key
+# Blog publishing (static files - deploy to Netlify/Vercel/GitHub Pages)
+BLOG_OUTPUT_DIR=./blog
+SITE_URL=https://claimcoach.app
 
 # Google Search Console (required for weekly monitoring)
 GSC_CREDENTIALS_JSON={"type":"service_account","project_id":"..."}
-SITE_URL=https://claimcoach.app
 
 # Database
 DATABASE_PATH=./data/claimcoach_content.db

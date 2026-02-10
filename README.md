@@ -50,7 +50,7 @@ This repository contains the **complete ClaimCoach Content Engine**, combining:
 | **Scout** | Keyword research & topic discovery | Every 8 hours |
 | **Quill** | Article writer using Claude API | Every 2 hours |
 | **Sage** | Quality reviewer (calls validation API) | 3x/day |
-| **Ezra** | Publisher to Ghost CMS | Every 4 hours |
+| **Ezra** | Publisher (static files) | Every 4 hours |
 | **Herald** | Social media promoter | 2x/day |
 | **Lurker** | Reddit/forum opportunity scanner | Every 8 hours |
 | **Morgan** | PM/orchestrator | 3x/day |
@@ -109,14 +109,12 @@ pip install -r requirements.txt
 # Anthropic API
 export ANTHROPIC_API_KEY="your-key"
 
-# Ghost CMS
-export GHOST_URL="https://claimcoach.app/blog"
-export GHOST_ADMIN_API_KEY="your-admin-api-key"
-export GHOST_CONTENT_API_KEY="your-content-api-key"
+# Blog publishing (static files)
+export BLOG_OUTPUT_DIR="./blog"
+export SITE_URL="https://claimcoach.app"
 
 # Google Search Console
 export GSC_CREDENTIALS_JSON='{"type": "service_account", ...}'
-export SITE_URL="https://claimcoach.app"
 
 # Database
 export DATABASE_PATH="./data/claimcoach_content.db"
@@ -136,7 +134,7 @@ python -c "from content_quality.db import init_database; init_database()"
 python -m pipeline.cli scout    # Discovers topics
 python -m pipeline.cli quill    # Writes articles
 python -m pipeline.cli sage     # Reviews quality
-python -m pipeline.cli ezra     # Publishes to Ghost
+python -m pipeline.cli ezra     # Publishes to static files
 
 # Check status
 python -m pipeline.cli status

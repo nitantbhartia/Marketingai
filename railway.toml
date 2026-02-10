@@ -15,9 +15,8 @@ timeout = 30
 
 # Environment variables (set these in Railway dashboard)
 # Required:
-# - GHOST_URL
-# - GHOST_ADMIN_API_KEY
-# - GHOST_CONTENT_API_KEY
+# - BLOG_OUTPUT_DIR (default: ./blog)
+# - SITE_URL (e.g., https://claimcoach.app)
 # - GOOGLE_SEARCH_CONSOLE_CREDENTIALS (JSON string)
 # - DATABASE_PATH (default: ./data/claimcoach_content.db)
 
