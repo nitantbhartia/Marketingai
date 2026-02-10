@@ -24,6 +24,12 @@ class BaseAgent(ABC):
         self.db = db
         self.logger = logging.getLogger(f"pipeline.{self.name}")
 
+    @property
+    def default_model(self) -> str:
+        """Get this agent's configured model from config."""
+        model_attr = f"{self.name}_model"
+        return getattr(self.config.anthropic, model_attr, "claude-haiku-4-5-20251001")
+
     @abstractmethod
     def run(self) -> dict[str, Any]:
         """Execute the agent's main task. Returns a summary dict."""
@@ -84,7 +90,7 @@ class BaseAgent(ABC):
         import anthropic
 
         client = anthropic.Anthropic(api_key=self.config.anthropic.api_key)
-        model = model or self.config.anthropic.writing_model
+        model = model or self.default_model
 
         kwargs: dict[str, Any] = {
             "model": model,

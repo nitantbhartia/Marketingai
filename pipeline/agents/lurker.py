@@ -252,7 +252,7 @@ Draft the response:"""
         try:
             response = self.call_claude(
                 prompt,
-                model=self.config.anthropic.review_model,
+                model=self.default_model,
                 max_tokens=400,
             )
             return response.strip()

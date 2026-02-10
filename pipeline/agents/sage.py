@@ -358,7 +358,7 @@ Format each issue on its own line starting with "- "."""
 
         result = self.call_claude(
             prompt,
-            model=self.config.anthropic.review_model,
+            model=self.default_model,
             max_tokens=500,
         )
 

@@ -106,7 +106,7 @@ class QuillAgent(BaseAgent):
             result = self.call_claude(
                 prompt=prompt,
                 system=SYSTEM_PROMPT,
-                model=self.config.anthropic.writing_model,
+                model=self.default_model,
                 max_tokens=8192,
             )
         except Exception as e:

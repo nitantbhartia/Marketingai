@@ -2,10 +2,16 @@
 # Copy to config.yaml and fill in your API keys
 
 # Claude API (required)
+# Per-agent model assignments — optimized for cost (~$0.10-$0.25/article)
+# Haiku for most agents, Sonnet only where reasoning quality matters
 anthropic:
   api_key: "sk-ant-..."
-  writing_model: "claude-sonnet-4-20250514"    # For Quill (writing)
-  review_model: "claude-haiku-4-20250514"      # For Sage (review/scoring)
+  quill_model: "claude-haiku-4-5-20251001"     # Writer — Haiku is surprisingly good with tight prompts
+  sage_model: "claude-sonnet-4-5-20250929"     # Reviewer — needs stronger reasoning for quality gate
+  scout_model: "claude-haiku-4-5-20251001"     # Research — structured keyword processing
+  morgan_model: "claude-haiku-4-5-20251001"    # PM — pipeline monitoring is structured logic
+  herald_model: "claude-haiku-4-5-20251001"    # Social — lightweight post drafting
+  lurker_model: "claude-haiku-4-5-20251001"    # Community — Reddit scanning + response drafts
 
 # Blog CMS - Ghost (Phase 2+)
 ghost:
