@@ -19,22 +19,41 @@ from pipeline.utils.seo import detect_faq_section, extract_links, score_seo
 logger = logging.getLogger(__name__)
 
 # Phrases that indicate unauthorized legal/medical/promissory claims
+# Derived from PRODUCT_CONTEXT.md "Language to NEVER Use" section
 FLAGGED_PHRASES = [
+    # Legal advice
     "you are legally entitled",
     "the law requires",
-    "you will receive",
+    "this constitutes legal advice",
+    "sue your insurance company",
+    "take legal action",
+    # Guarantees / promissory language
+    "claimcoach will get you more money",
+    "guaranteed results",
+    "100% success rate",
     "guaranteed to get",
+    "you will receive",
     "we guarantee",
+    "get thousands more",
+    "recover thousands",
+    "you are owed at least",
+    # False product claims
+    "claimcoach negotiates for you",
     "claimcoach will negotiate",
     "negotiate on your behalf",
     "claimcoach files",
     "claimcoach will file",
-    "upload your policy",
-    "get thousands more",
-    "recover thousands",
-    "you are owed at least",
     "legally binding analysis",
-    "this constitutes legal advice",
+    # Future features (must not reference)
+    "upload your settlement letter",
+    "upload your policy",
+    "our ai reviews your policy",
+    "generates your dispute letter",
+    "generate a dispute letter",
+    "chat assistant",
+    "status tracking",
+    # Unverified data claims
+    "average user recovers",
 ]
 
 
@@ -280,16 +299,27 @@ class SageAgent(BaseAgent):
 
         content_lower = content.lower()
 
-        # Check for false product claims
+        # Check for false product claims (aligned with PRODUCT_CONTEXT.md)
         false_claims = [
             ("negotiate on your behalf", "Claims ClaimCoach negotiates with insurers"),
             ("negotiate with insurance", "Implies ClaimCoach negotiates directly"),
+            ("communicates with.*adjuster", "Claims ClaimCoach communicates with adjusters"),
             ("file a claim for you", "Claims ClaimCoach files claims"),
             ("file your dispute", "Claims ClaimCoach files disputes"),
-            ("upload your policy", "References non-existent feature"),
+            ("files? your appeal", "Claims ClaimCoach files appeals"),
+            ("upload your policy", "References future feature (PDF uploads)"),
+            ("upload your settlement", "References future feature (document uploads)"),
+            ("generates? (?:a |your )?dispute letter", "References future feature (dispute letters)"),
+            ("chat assistant", "References future feature (chat assistant)"),
+            ("status tracking", "References future feature (status tracking)"),
+            ("pull(?:s)? comparable.*listings", "References future feature (auto comp pulls)"),
             ("analyze your health insurance", "References non-auto insurance"),
             ("analyze your homeowner", "References non-auto insurance"),
+            ("analyze your renter", "References non-auto insurance"),
             ("access insurance.*database", "Claims database access"),
+            ("access.*ccc one", "Claims access to CCC ONE"),
+            ("binding valuation", "Claims legally binding valuations"),
+            ("legally enforceable appraisal", "Claims legally enforceable appraisals"),
         ]
 
         for pattern, issue in false_claims:
