@@ -2,15 +2,28 @@
 
 Automated content validation and SEO monitoring system for ClaimCoach blog content.
 
+> **📖 Complete Documentation:**
+> - **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Complete system overview and data flow
+> - **[INTEGRATION.md](./INTEGRATION.md)** - How to integrate with agent pipeline
+> - **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Railway deployment guide
+
 ## Overview
 
-This system provides **8 automated validators and monitors** that ensure ClaimCoach's AI-generated blog content is:
-- ✅ Factually accurate (state regulations, product claims)
-- ✅ SEO-optimized (100-point scoring system)
-- ✅ Readable at 8th-grade level
-- ✅ Mathematically correct
-- ✅ Free of broken links
-- ✅ Continuously improving based on Search Console data
+This repository contains the **Content Quality & SEO Automation** subsystem of the ClaimCoach Content Engine. It integrates with the agent pipeline (Scout → Quill → Sage → Ezra → Herald → Lurker → Morgan) to ensure all published content meets quality standards.
+
+**8 Automated Systems:**
+- ✅ **Pre-Publish Validators (1-6):** State accuracy, product claims, SEO, readability, links, math
+- ✅ **Post-Publish Monitors (7-8):** Search Console analysis, content health checks
+
+## Quick Links
+
+| Document | Description |
+|----------|-------------|
+| **[ARCHITECTURE.md](./ARCHITECTURE.md)** | Complete system architecture, data flow, integration points |
+| **[INTEGRATION.md](./INTEGRATION.md)** | How agents integrate with this system |
+| **[DEPLOYMENT.md](./DEPLOYMENT.md)** | Railway deployment instructions (3 options) |
+| **[agents/](./agents/)** | Integration examples for Quill, Sage, Morgan |
+| **[reference/](./reference/)** | PRODUCT_CONTEXT.md, STATE_RULES.md (loaded by agents) |
 
 ## Architecture
 
