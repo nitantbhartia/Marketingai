@@ -1,0 +1,37 @@
+# Railway Configuration for ClaimCoach Content Quality System
+
+[build]
+builder = "nixpacks"
+
+# API Server Service (Pre-publish validation gates)
+[[services]]
+name = "content-quality-api"
+buildCommand = "pip install -r requirements.txt"
+startCommand = "python api_server.py"
+
+[services.healthcheck]
+path = "/health"
+timeout = 30
+
+# Environment variables (set these in Railway dashboard)
+# Required:
+# - GHOST_URL
+# - GHOST_ADMIN_API_KEY
+# - GHOST_CONTENT_API_KEY
+# - GOOGLE_SEARCH_CONSOLE_CREDENTIALS (JSON string)
+# - DATABASE_PATH (default: ./data/claimcoach_content.db)
+
+# Cron Monitor Service (Weekly jobs)
+[[services]]
+name = "content-monitor"
+buildCommand = "pip install -r requirements.txt"
+startCommand = "python cron_runner.py"
+
+# Schedules:
+# - Monday 6am UTC: Search Console report
+# - Monday 8am UTC: Content health check
+
+# Database volume (persistent storage for SQLite)
+[[volumes]]
+name = "data"
+mountPath = "/app/data"
