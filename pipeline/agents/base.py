@@ -1,0 +1,107 @@
+"""Base agent class with common functionality."""
+
+from __future__ import annotations
+
+import logging
+import random
+import time
+import uuid
+from abc import ABC, abstractmethod
+from typing import Any
+
+from pipeline.config import Config
+from pipeline.db import Database
+
+
+class BaseAgent(ABC):
+    """Base class for all pipeline agents."""
+
+    name: str = "base"
+    claim_field: str | None = None  # Which claim field this agent uses
+
+    def __init__(self, config: Config, db: Database):
+        self.config = config
+        self.db = db
+        self.logger = logging.getLogger(f"pipeline.{self.name}")
+
+    @property
+    def default_model(self) -> str:
+        """Get this agent's configured model from config."""
+        model_attr = f"{self.name}_model"
+        return getattr(self.config.anthropic, model_attr, "claude-haiku-4-5-20251001")
+
+    @abstractmethod
+    def run(self) -> dict[str, Any]:
+        """Execute the agent's main task. Returns a summary dict."""
+        ...
+
+    def generate_claim_id(self) -> str:
+        """Generate a unique claim ID for claim locking."""
+        ts = int(time.time())
+        rand = uuid.uuid4().hex[:6]
+        return f"{self.name}-{ts}-{rand}"
+
+    def try_claim_article(self, article_id: str, new_status: str) -> bool:
+        """Attempt to claim an article using this agent's claim field."""
+        if self.claim_field is None:
+            raise ValueError(f"Agent {self.name} has no claim_field defined")
+        claim_id = self.generate_claim_id()
+        return self.db.try_claim(article_id, self.claim_field, claim_id, new_status)
+
+    def pick_and_claim(self, from_status: str, to_status: str) -> str | None:
+        """Pick a random unclaimed article from a status and claim it.
+
+        Returns article ID if successful, None otherwise.
+        """
+        if self.claim_field is None:
+            raise ValueError(f"Agent {self.name} has no claim_field defined")
+
+        articles = self.db.query_articles(
+            status=from_status,
+            writer_claim_empty=(self.claim_field == "writer_claim"),
+            limit=50,
+        )
+        if not articles:
+            self.logger.info(f"No articles in '{from_status}' status")
+            return None
+
+        # Shuffle to prevent collision when multiple instances run
+        random.shuffle(articles)
+
+        for article in articles:
+            claim_val = getattr(article, self.claim_field, "")
+            if claim_val and claim_val != "":
+                continue
+            if self.try_claim_article(article.id, to_status):
+                self.logger.info(f"Claimed article {article.id}: {article.title}")
+                return article.id
+
+        self.logger.info(f"Failed to claim any article from '{from_status}'")
+        return None
+
+    def call_claude(
+        self,
+        prompt: str,
+        system: str = "",
+        model: str | None = None,
+        max_tokens: int = 4096,
+    ) -> str:
+        """Call Claude API and return the text response."""
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=self.config.anthropic.api_key)
+        model = model or self.default_model
+
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if system:
+            kwargs["system"] = system
+
+        self.logger.debug(f"Calling Claude ({model}), prompt length={len(prompt)}")
+        response = client.messages.create(**kwargs)
+        text = response.content[0].text
+        self.logger.debug(f"Claude response length={len(text)}")
+        return text

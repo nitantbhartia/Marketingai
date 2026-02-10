@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claimcoach-content-pipeline"
+version = "0.1.0"
+description = "Autonomous AI content marketing pipeline for ClaimCoach"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.39.0",
+    "click>=8.1.0",
+    "apscheduler>=3.10.0",
+    "pyyaml>=6.0",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "markdown>=3.5.0",
+    "jinja2>=3.1.0",
+    "textstat>=0.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+pipeline = "pipeline.cli:cli"
+
+[tool.setuptools.packages.find]
+include = ["pipeline*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

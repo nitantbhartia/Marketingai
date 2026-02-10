@@ -24,6 +24,7 @@ share/python-wheels/
 
 # Virtual environments
 venv/
+.venv/
 env/
 ENV/
 env.bak/
@@ -43,9 +44,13 @@ venv.bak/
 *.db-shm
 data/
 
-# Environment variables
+# Config with secrets
+config.yaml
 .env
 .env.local
+
+# Output
+output/
 
 # Logs
 *.log
