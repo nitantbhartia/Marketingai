@@ -109,6 +109,9 @@ class Config:
         cfg.anthropic.api_key = (
             os.environ.get("ANTHROPIC_API_KEY") or cfg.anthropic.api_key
         )
+        cfg.pipeline.database_path = (
+            os.environ.get("DATABASE_PATH") or cfg.pipeline.database_path
+        )
         cfg.blog.output_dir = (
             os.environ.get("BLOG_OUTPUT_DIR") or cfg.blog.output_dir
         )
