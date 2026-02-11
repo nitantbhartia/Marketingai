@@ -12,7 +12,7 @@ from typing import Dict, Any, List
 import anthropic
 
 from pipeline.agents.base import Agent
-from pipeline.db import get_db, log_content_remix, log_agent_action
+from content_quality.db import get_db, log_content_remix, log_agent_action
 
 
 class Remix(Agent):

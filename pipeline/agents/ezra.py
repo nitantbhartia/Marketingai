@@ -15,8 +15,7 @@ import markdown
 from jinja2 import Template
 
 from pipeline.agents.base import Agent
-from pipeline.db import get_db, claim_article, release_claim
-from content_quality.db import add_cta_variant
+from content_quality.db import get_db, claim_article, release_claim, add_cta_variant, log_agent_action
 
 
 class Ezra(Agent):
@@ -152,7 +151,6 @@ class Ezra(Agent):
             self.log(f"✓ Published: {published_url}")
 
             # Log to agent_log
-            from pipeline.db import log_agent_action
             log_agent_action(
                 agent_name=self.name,
                 action="published",

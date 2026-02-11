@@ -12,7 +12,7 @@ from collections import defaultdict
 import statistics
 
 from pipeline.agents.base import Agent
-from pipeline.db import get_db, log_performance_insight, log_agent_action
+from content_quality.db import get_db, log_performance_insight, log_agent_action
 
 
 class Atlas(Agent):
