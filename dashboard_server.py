@@ -323,19 +323,29 @@ async def health_check():
 
 
 if __name__ == "__main__":
+    import argparse
+    import os
     import uvicorn
+
+    parser = argparse.ArgumentParser(description="ClaimCoach Review Dashboard")
+    parser.add_argument("--port", type=int, help="Port to run on")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
+    args = parser.parse_args()
+
+    # Priority: CLI arg > ENV var > config default
+    port = args.port or int(os.getenv("PORT", API_PORT))
 
     print("=" * 60)
     print("  ClaimCoach Content Review Dashboard")
     print("=" * 60)
-    print(f"  Dashboard: http://localhost:{API_PORT}/")
+    print(f"  Dashboard: http://localhost:{port}/")
     print(f"  Database:  {DATABASE_PATH}")
     print("=" * 60)
     print()
 
     uvicorn.run(
         app,
-        host="0.0.0.0",
-        port=API_PORT,
+        host=args.host,
+        port=port,
         log_level="info"
     )
