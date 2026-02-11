@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review: {{ article.title }} - ClaimCoach Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <a href="/">← Back to Dashboard</a>
+                </div>
+                <div class="header-actions">
+                    <span class="status-badge status-{{ article.status }}">
+                        {{ article.status.replace('_', ' ').title() }}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="container review-container">
+            <!-- Article Header -->
+            <div class="article-review-header">
+                <h1 class="article-review-title">{{ article.title }}</h1>
+                <div class="article-review-meta">
+                    <span class="meta-item">
+                        <strong>ID:</strong> {{ article.id }}
+                    </span>
+                    <span class="meta-item">
+                        <strong>Keyword:</strong> {{ article.target_keyword or 'N/A' }}
+                    </span>
+                    <span class="meta-item">
+                        <strong>State:</strong> {{ article.target_state or 'N/A' }}
+                    </span>
+                    <span class="meta-item">
+                        <strong>Word Count:</strong> {{ word_count }}
+                    </span>
+                    <span class="meta-item">
+                        <strong>Revisions:</strong> {{ article.revision_count or 0 }}
+                    </span>
+                </div>
+            </div>
+
+            <!-- Two Column Layout -->
+            <div class="review-grid">
+                <!-- Left Column - Content Preview -->
+                <div class="review-main">
+                    <!-- Meta Data -->
+                    <div class="review-section">
+                        <h2 class="section-heading">SEO Metadata</h2>
+                        <div class="meta-field">
+                            <label>Meta Title</label>
+                            <div class="meta-value">
+                                {{ article.meta_title or article.title }}
+                                <span class="char-count">({{ (article.meta_title or article.title)|length }} chars)</span>
+                            </div>
+                        </div>
+                        <div class="meta-field">
+                            <label>Meta Description</label>
+                            <div class="meta-value">
+                                {{ article.meta_description or 'N/A' }}
+                                {% if article.meta_description %}
+                                <span class="char-count">({{ article.meta_description|length }} chars)</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="meta-field">
+                            <label>Slug</label>
+                            <div class="meta-value mono">{{ article.slug or 'auto-generated' }}</div>
+                        </div>
+                    </div>
+
+                    <!-- Content Preview -->
+                    <div class="review-section">
+                        <h2 class="section-heading">Content Preview</h2>
+                        <div class="content-preview">
+                            {{ article.markdown_content|truncate(2000) if article.markdown_content else 'No content available' }}
+                        </div>
+                        {% if article.markdown_content and article.markdown_content|length > 2000 %}
+                        <button class="btn btn-secondary btn-sm" onclick="showFullContent()">
+                            Show Full Content
+                        </button>
+                        {% endif %}
+                    </div>
+
+                    <!-- Full Content (Hidden) -->
+                    {% if article.markdown_content %}
+                    <div id="fullContent" class="review-section" style="display: none;">
+                        <h2 class="section-heading">Full Content</h2>
+                        <div class="content-full">
+                            {{ article.markdown_content }}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Validation Notes -->
+                    {% if validation_notes %}
+                    <div class="review-section">
+                        <h2 class="section-heading">Validation Issues</h2>
+                        <div class="validation-issues">
+                            {% for note in validation_notes %}
+                            <div class="validation-issue">
+                                <span class="issue-icon">⚠️</span>
+                                <span class="issue-text">{{ note }}</span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Revision History -->
+                    {% if article.revision_notes %}
+                    <div class="review-section">
+                        <h2 class="section-heading">Revision Notes</h2>
+                        <div class="revision-notes">
+                            {{ article.revision_notes }}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Action History -->
+                    {% if history %}
+                    <div class="review-section">
+                        <h2 class="section-heading">Action History</h2>
+                        <div class="history-timeline">
+                            {% for event in history %}
+                            <div class="timeline-item">
+                                <div class="timeline-dot"></div>
+                                <div class="timeline-content">
+                                    <div class="timeline-header">
+                                        <strong>{{ event.agent_name }}</strong>
+                                        <span class="timeline-action">{{ event.action }}</span>
+                                    </div>
+                                    <div class="timeline-time">{{ event.created_at }}</div>
+                                    {% if event.details %}
+                                    <div class="timeline-details">
+                                        {{ event.details if event.details is string else event.details|tojson }}
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Right Column - Scores & Actions -->
+                <div class="review-sidebar">
+                    <!-- Quality Scores -->
+                    <div class="sidebar-card">
+                        <h3 class="card-heading">Quality Scores</h3>
+
+                        <div class="score-detail">
+                            <div class="score-header">
+                                <span class="score-label">SEO Score</span>
+                                <span class="score-number score-{{ 'excellent' if article.seo_score and article.seo_score >= 80 else 'good' if article.seo_score and article.seo_score >= 60 else 'needs-work' }}">
+                                    {{ article.seo_score or 'N/A' }}/100
+                                </span>
+                            </div>
+                            {% if article.seo_score %}
+                            <div class="score-bar-large">
+                                <div class="score-fill-large score-{{ 'excellent' if article.seo_score >= 80 else 'good' if article.seo_score >= 60 else 'needs-work' }}"
+                                     style="width: {{ article.seo_score }}%"></div>
+                            </div>
+                            <div class="score-verdict">
+                                {% if article.seo_score >= 80 %}
+                                ✅ Excellent - Ready for top rankings
+                                {% elif article.seo_score >= 60 %}
+                                ⚠️ Good - Minor improvements possible
+                                {% else %}
+                                ❌ Needs Work - Significant issues
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="score-detail">
+                            <div class="score-header">
+                                <span class="score-label">Readability</span>
+                                <span class="score-number score-{{ 'excellent' if article.readability_score and article.readability_score >= 70 else 'good' if article.readability_score and article.readability_score >= 50 else 'needs-work' }}">
+                                    {{ "%.1f"|format(article.readability_score) if article.readability_score else 'N/A' }}/100
+                                </span>
+                            </div>
+                            {% if article.readability_score %}
+                            <div class="score-bar-large">
+                                <div class="score-fill-large score-{{ 'excellent' if article.readability_score >= 70 else 'good' if article.readability_score >= 50 else 'needs-work' }}"
+                                     style="width: {{ article.readability_score }}%"></div>
+                            </div>
+                            <div class="score-verdict">
+                                {% if article.readability_score >= 70 %}
+                                ✅ Easy to Read - 8th grade level
+                                {% elif article.readability_score >= 50 %}
+                                ⚠️ Moderate - Could be clearer
+                                {% else %}
+                                ❌ Difficult - Too complex
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="score-metrics">
+                            <div class="metric-row">
+                                <span class="metric-label">Product Compliance</span>
+                                <span class="metric-value {{ 'metric-pass' if article.product_compliance == 'PASS' else 'metric-fail' }}">
+                                    {{ article.product_compliance or 'N/A' }}
+                                </span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="metric-label">State Accuracy</span>
+                                <span class="metric-value {{ 'metric-pass' if article.state_accuracy == 'PASS' else 'metric-fail' }}">
+                                    {{ article.state_accuracy or 'N/A' }}
+                                </span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="metric-label">Broken Links</span>
+                                <span class="metric-value {{ 'metric-pass' if article.broken_links_count == 0 else 'metric-fail' }}">
+                                    {{ article.broken_links_count or 0 }}
+                                </span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="metric-label">Math Errors</span>
+                                <span class="metric-value {{ 'metric-pass' if article.math_errors_count == 0 else 'metric-fail' }}">
+                                    {{ article.math_errors_count or 0 }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CTA Variants -->
+                    {% if cta_variants %}
+                    <div class="sidebar-card">
+                        <h3 class="card-heading">CTA Variants</h3>
+                        {% for cta in cta_variants %}
+                        <div class="cta-variant">
+                            <div class="cta-type">{{ cta.cta_type }} - {{ cta.position }}</div>
+                            <div class="cta-text">{{ cta.cta_text|truncate(80) }}</div>
+                            {% if cta.impressions or cta.clicks %}
+                            <div class="cta-metrics">
+                                <span>👁 {{ cta.impressions }}</span>
+                                <span>👆 {{ cta.clicks }}</span>
+                                {% if cta.conversions %}
+                                <span>✅ {{ cta.conversions }}</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    <!-- Actions -->
+                    <div class="sidebar-card sidebar-actions">
+                        <h3 class="card-heading">Review Actions</h3>
+
+                        {% if article.status == 'review' or article.status == 'ready_to_publish' %}
+                        <button class="btn btn-success btn-full" onclick="approveArticle()">
+                            ✅ Approve & Publish
+                        </button>
+
+                        <button class="btn btn-warning btn-full" onclick="requestRevision()">
+                            ✏️ Request Revision
+                        </button>
+                        {% endif %}
+
+                        {% if article.status == 'ready_to_publish' %}
+                        <button class="btn btn-primary btn-full" onclick="publishNow()">
+                            🚀 Publish Immediately
+                        </button>
+                        {% endif %}
+
+                        {% if article.published_url %}
+                        <a href="{{ article.published_url }}" target="_blank" class="btn btn-secondary btn-full">
+                            👁 View Published
+                        </a>
+                        {% endif %}
+
+                        <a href="/" class="btn btn-outline btn-full">
+                            ← Back to Dashboard
+                        </a>
+                    </div>
+
+                    <!-- Timestamps -->
+                    <div class="sidebar-card">
+                        <h3 class="card-heading">Timeline</h3>
+                        <div class="timestamp-list">
+                            <div class="timestamp-item">
+                                <span class="timestamp-label">Created</span>
+                                <span class="timestamp-value">{{ article.created_at }}</span>
+                            </div>
+                            <div class="timestamp-item">
+                                <span class="timestamp-label">Last Updated</span>
+                                <span class="timestamp-value">{{ article.updated_at }}</span>
+                            </div>
+                            {% if article.published_at %}
+                            <div class="timestamp-item">
+                                <span class="timestamp-label">Published</span>
+                                <span class="timestamp-value">{{ article.published_at }}</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modals -->
+    <div id="revisionModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Request Revision</h2>
+                <button class="modal-close" onclick="closeModal('revisionModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <label for="revisionReason">Describe what needs to be fixed:</label>
+                <textarea id="revisionReason" rows="6" class="form-textarea"
+                          placeholder="Be specific about what needs improvement..."></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('revisionModal')">Cancel</button>
+                <button class="btn btn-warning" onclick="submitRevision()">Submit Revision Request</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="approveModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Approve Article</h2>
+                <button class="modal-close" onclick="closeModal('approveModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Approve this article for publishing?</p>
+                <label for="approveNotes">Optional notes:</label>
+                <textarea id="approveNotes" rows="3" class="form-textarea"
+                          placeholder="Any notes for the team..."></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('approveModal')">Cancel</button>
+                <button class="btn btn-success" onclick="submitApproval()">Approve</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/dashboard.js"></script>
+    <script>
+        const articleId = {{ article.id }};
+    </script>
+</body>
+</html>

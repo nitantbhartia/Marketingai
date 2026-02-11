@@ -11,6 +11,8 @@ import logging
 import re
 from typing import Any
 
+import requests
+
 from pipeline.agents.base import BaseAgent
 from pipeline.db import ArticleStatus
 from pipeline.utils.readability import readability_report, word_count
@@ -250,6 +252,10 @@ class SageAgent(BaseAgent):
 
         self.db.update_article(article.id, **update_kwargs)
 
+        # Notify dashboard if ready for review/approval
+        if decision in ["approved", "revision"]:
+            self._notify_dashboard(article.id, decision, total_score)
+
         logger.info(
             f"Article {article.id} ({article.title}): "
             f"score={total_score}/100 -> {decision}"
@@ -428,3 +434,36 @@ Format each issue on its own line starting with "- "."""
                 lines.append(f"- {issue}")
 
         return "\n".join(lines)
+
+    def _notify_dashboard(self, article_id: int, decision: str, score: float) -> None:
+        """Send webhook notification to dashboard when article is ready for review."""
+        try:
+            dashboard_url = self.config.pipeline.dashboard_url
+            if not dashboard_url:
+                # Dashboard not configured, skip notification
+                return
+
+            webhook_url = f"{dashboard_url}/api/notifications/article-ready"
+
+            payload = {
+                "article_id": article_id,
+                "status": decision,
+                "score": score,
+                "agent": "sage",
+                "message": f"Article {article_id} is ready for review (score: {score}/100)"
+            }
+
+            response = requests.post(
+                webhook_url,
+                json=payload,
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                logger.info(f"Dashboard notified about article {article_id}")
+            else:
+                logger.warning(f"Dashboard notification failed: {response.status_code}")
+
+        except Exception as e:
+            # Don't fail the review if notification fails
+            logger.warning(f"Failed to notify dashboard: {e}")

@@ -1,2 +1,1 @@
-web: python api_server.py
-worker: python cron_runner.py
+web: bash railway_start.sh

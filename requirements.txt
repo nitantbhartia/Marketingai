@@ -1,42 +1,49 @@
-# ClaimCoach Complete Content Engine
-# Combines agent pipeline + quality validation system
+# ClaimCoach Content Pipeline - Complete Automation System
+# Includes: All agents, Dashboard, API server, Scheduling
 
-# Core - Claude API
-anthropic>=0.39.0
+# Core Framework
+anthropic>=0.40.0
+pyyaml>=6.0
+python-dateutil>=2.8.2
 
-# Web framework (for quality API server)
+# Web Framework (Dashboard + API)
 fastapi>=0.104.0
-uvicorn>=0.24.0
+uvicorn[standard]>=0.24.0
 pydantic>=2.5.0
+jinja2>=3.1.3
+python-multipart>=0.0.6
 
-# HTTP client
+# HTTP & Web Scraping
 requests>=2.31.0
-
-# Content analysis
-textstat>=0.7.3
 beautifulsoup4>=4.12.0
-markdown>=3.5.0
+html2text>=2020.1.16
 
-# Google APIs
-google-api-python-client>=2.100.0
-google-auth>=2.23.0
+# Content Analysis & SEO
+textstat>=0.7.3
+markdown>=3.5.0
+readability-lxml>=0.8.1
+
+# Scheduling & Cron
+schedule>=1.2.0
+python-crontab>=3.0.0
 
 # Machine learning (for cannibalization detection)
 scikit-learn>=1.3.0
 
-# Utilities
-pyyaml>=6.0
-python-dateutil>=2.8.2
-click>=8.1.0
-jinja2>=3.1.0
+# Google APIs (Search Console)
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
 
-# Scheduling
-schedule>=1.2.0
-apscheduler>=3.10.0
+# Social Media APIs (Optional)
+praw>=7.7.0  # Reddit
+tweepy>=4.14.0  # Twitter
+
+# OpenAI (Image generation - Optional)
+openai>=1.10.0
+
+# Utilities
+python-dotenv>=1.0.0
 
 # SQLite is built into Python - no dependency needed
-
-# Development tools (optional)
-# pytest>=7.0
-# pytest-asyncio>=0.21
-# ruff>=0.1.0

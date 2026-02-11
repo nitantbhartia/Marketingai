@@ -1,11 +1,22 @@
-# Railway Configuration for ClaimCoach Content Quality System
+# Railway Configuration for ClaimCoach Complete Pipeline
 
 [build]
 builder = "nixpacks"
 
-# API Server Service (Pre-publish validation gates)
+# Dashboard Service (Review UI - PRIMARY WEB SERVICE)
 [[services]]
-name = "content-quality-api"
+name = "dashboard"
+buildCommand = "pip install -r requirements.txt"
+startCommand = "python dashboard_server.py --port $PORT"
+
+[services.healthcheck]
+path = "/health"
+timeout = 30
+interval = 30
+
+# API Server Service (REST API for integrations)
+[[services]]
+name = "api"
 buildCommand = "pip install -r requirements.txt"
 startCommand = "python api_server.py"
 
@@ -13,24 +24,39 @@ startCommand = "python api_server.py"
 path = "/health"
 timeout = 30
 
-# Environment variables (set these in Railway dashboard)
-# Required:
-# - BLOG_OUTPUT_DIR (default: ./blog)
-# - SITE_URL (e.g., https://claimcoach.app)
-# - GOOGLE_SEARCH_CONSOLE_CREDENTIALS (JSON string)
-# - DATABASE_PATH (default: ./data/claimcoach_content.db)
-
-# Cron Monitor Service (Weekly jobs)
+# Cron Worker Service (Scheduled agent runs)
 [[services]]
-name = "content-monitor"
+name = "worker"
 buildCommand = "pip install -r requirements.txt"
 startCommand = "python cron_runner.py"
 
-# Schedules:
-# - Monday 6am UTC: Search Console report
-# - Monday 8am UTC: Content health check
+# Worker runs all agents on schedule:
+# - Scout: Every 8 hours
+# - Quill: Every 2 hours
+# - Sage: 3x/day (8am, 2pm, 8pm)
+# - Ezra: Every 4 hours
+# - Atlas: Weekly (Monday 6am)
+# - Rival: Daily (8am)
+# - Remix: Every 6 hours
+# - Morgan: 3x/day
+# - Herald: 2x/day
+# - Lurker: Every 8 hours
 
 # Database volume (persistent storage for SQLite)
 [[volumes]]
 name = "data"
 mountPath = "/app/data"
+
+# Environment variables (set in Railway dashboard)
+# REQUIRED:
+# - ANTHROPIC_API_KEY (Claude API key)
+# - DATABASE_PATH=/app/data/pipeline.db
+# - DASHBOARD_URL=https://your-dashboard.railway.app
+#
+# OPTIONAL:
+# - GOOGLE_SEARCH_CONSOLE_CREDENTIALS (for Atlas)
+# - AHREFS_API_KEY or SEMRUSH_API_KEY (for Scout)
+# - COPYSCAPE_API_KEY, COPYSCAPE_USERNAME (for Sage)
+# - REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET (for Lurker)
+# - TWITTER_API_KEY, TWITTER_API_SECRET (for Herald)
+# - OPENAI_API_KEY (for image generation)
