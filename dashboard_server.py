@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from content_quality.db import get_db, log_agent_action
+from content_quality.db import get_db, log_agent_action, init_database
 from content_quality.config import DATABASE_PATH, API_PORT
 
 app = FastAPI(
@@ -23,6 +23,12 @@ app = FastAPI(
     description="Review and approve content before publishing",
     version="1.0.0"
 )
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on startup."""
+    init_database()
+    print(f"✓ Database initialized at {DATABASE_PATH}")
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"

@@ -55,6 +55,7 @@ def init_database():
                 validation_status TEXT,
                 seo_score INTEGER,
                 readability_score REAL,
+                word_count INTEGER DEFAULT 0,
                 state_accuracy TEXT,
                 product_compliance TEXT,
                 broken_links_count INTEGER DEFAULT 0,
@@ -237,6 +238,20 @@ def init_database():
 
         db.execute("CREATE INDEX IF NOT EXISTS idx_remix_source ON content_remixes(source_article_id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_remix_type ON content_remixes(remix_type)")
+
+        # Migrations: Add columns that might be missing in older databases
+        _run_migrations(db)
+
+
+def _run_migrations(db):
+    """Run database migrations for schema changes."""
+    # Check if word_count column exists, add if missing
+    cursor = db.execute("PRAGMA table_info(articles)")
+    columns = [row[1] for row in cursor.fetchall()]
+
+    if 'word_count' not in columns:
+        db.execute("ALTER TABLE articles ADD COLUMN word_count INTEGER DEFAULT 0")
+        print("✓ Added word_count column to articles table")
 
 
 def claim_article(article_id: int, claim_field: str, claim_id: str) -> bool:
