@@ -268,6 +268,64 @@ async def validate_all_endpoint(article: ArticleInput):
         raise HTTPException(status_code=500, detail=f"Validation error: {str(e)}")
 
 
+# Quick agent trigger endpoints
+@app.get("/trigger/scout")
+async def trigger_scout():
+    """Manually trigger Scout agent to create topics."""
+    try:
+        from pipeline.cli import run_agent
+        from pipeline.config import load_config
+
+        config = load_config()
+        result = run_agent("scout", config)
+
+        return {
+            "status": "success",
+            "agent": "scout",
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+
+
+@app.get("/trigger/quill")
+async def trigger_quill():
+    """Manually trigger Quill agent to write articles."""
+    try:
+        from pipeline.cli import run_agent
+        from pipeline.config import load_config
+
+        config = load_config()
+        result = run_agent("quill", config)
+
+        return {
+            "status": "success",
+            "agent": "quill",
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+
+
+@app.get("/trigger/sage")
+async def trigger_sage():
+    """Manually trigger Sage agent to review articles."""
+    try:
+        from pipeline.cli import run_agent
+        from pipeline.config import load_config
+
+        config = load_config()
+        result = run_agent("sage", config)
+
+        return {
+            "status": "success",
+            "agent": "sage",
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+
+
 # Entry point for running the server
 if __name__ == "__main__":
     print(f"Starting ClaimCoach Content Quality API on {API_HOST}:{API_PORT}")
