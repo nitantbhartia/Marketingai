@@ -2,6 +2,9 @@
 
 Provides the shared state that all agents read from and write to.
 Article status transitions are the coordination mechanism.
+
+Schema is aligned with content_quality.db so the dashboard and pipeline
+agents share a single articles table.
 """
 
 from __future__ import annotations
@@ -10,7 +13,7 @@ import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -31,36 +34,74 @@ class ArticleStatus(str, Enum):
 
 @dataclass
 class Article:
-    id: str = ""
+    id: int = 0
     title: str = ""
-    status: str = ArticleStatus.BACKLOG.value
-    keyword: str = ""
-    search_volume: int = 0
-    keyword_difficulty: float = 0.0
-    commercial_intent: float = 0.0
-    content_brief: str = ""
-    target_state: str = ""
-    content_category: str = ""
-    content: str = ""
-    meta_description: str = ""
     slug: str = ""
+    target_keyword: str = ""
+    target_state: str = ""
+    status: str = ArticleStatus.BACKLOG.value
+    markdown_content: str = ""
+    meta_title: str = ""
+    meta_description: str = ""
+
+    # Claim locking
     writer_claim: str = ""
     editor_claim: str = ""
     publisher_claim: str = ""
     herald_claim: str = ""
-    social_status: str = ""
-    revision_notes: str = ""
-    revision_count: int = 0
-    published_url: str = ""
+
+    # Pipeline-specific fields
+    search_volume: int = 0
+    keyword_difficulty: float = 0.0
+    commercial_intent: float = 0.0
+    content_brief: str = ""
+    content_category: str = ""
+    suggested_title: str = ""
+    internal_links: str = "[]"
+    external_links: str = "[]"
+
+    # Validation results
+    validation_status: str = ""
     seo_score: float = 0.0
     readability_score: float = 0.0
     word_count: int = 0
+    state_accuracy: str = ""
+    product_compliance: str = ""
+    broken_links_count: int = 0
+    math_errors_count: int = 0
+    validation_notes: str = ""
+
+    # Revision tracking
+    revision_count: int = 0
+    revision_notes: str = ""
+
+    # Publishing
+    ghost_post_id: str = ""
+    published_url: str = ""
+    published_at: str = ""
+    social_status: str = ""
+
+    # SEO monitoring
+    last_gsc_position: float = 0.0
+    last_gsc_impressions: int = 0
+    last_gsc_clicks: int = 0
+    last_gsc_ctr: float = 0.0
+    refresh_priority: str = ""
+    cannibalization_flag: int = 0
+
+    # Timestamps
     created_at: str = ""
     updated_at: str = ""
-    published_at: str = ""
-    suggested_title: str = ""
-    internal_links: str = "[]"  # JSON array
-    external_links: str = "[]"  # JSON array
+
+
+_ARTICLE_FIELDS = None
+
+
+def _get_article_fields() -> set[str]:
+    global _ARTICLE_FIELDS
+    if _ARTICLE_FIELDS is None:
+        _ARTICLE_FIELDS = {f.name for f in fields(Article)}
+    return _ARTICLE_FIELDS
 
 
 @dataclass
@@ -104,42 +145,63 @@ class SocialPost:
     status: str = "draft"  # draft, posted, failed
 
 
+# Articles table matches the content_quality schema so dashboard and
+# pipeline agents operate on the same table.  Pipeline-specific columns
+# are added via _run_article_migrations().
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS articles (
-    id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'backlog',
-    keyword TEXT NOT NULL DEFAULT '',
-    search_volume INTEGER DEFAULT 0,
-    keyword_difficulty REAL DEFAULT 0.0,
-    commercial_intent REAL DEFAULT 0.0,
-    content_brief TEXT DEFAULT '',
+    slug TEXT UNIQUE,
+    target_keyword TEXT DEFAULT '',
     target_state TEXT DEFAULT '',
-    content_category TEXT DEFAULT '',
-    content TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'backlog',
+    markdown_content TEXT DEFAULT '',
+    meta_title TEXT DEFAULT '',
     meta_description TEXT DEFAULT '',
-    slug TEXT DEFAULT '',
+
+    -- Claim locking
     writer_claim TEXT DEFAULT '',
     editor_claim TEXT DEFAULT '',
     publisher_claim TEXT DEFAULT '',
     herald_claim TEXT DEFAULT '',
-    social_status TEXT DEFAULT '',
-    revision_notes TEXT DEFAULT '',
-    revision_count INTEGER DEFAULT 0,
-    published_url TEXT DEFAULT '',
+
+    -- Validation results
+    validation_status TEXT DEFAULT '',
     seo_score REAL DEFAULT 0.0,
     readability_score REAL DEFAULT 0.0,
     word_count INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
+    state_accuracy TEXT DEFAULT '',
+    product_compliance TEXT DEFAULT '',
+    broken_links_count INTEGER DEFAULT 0,
+    math_errors_count INTEGER DEFAULT 0,
+    validation_notes TEXT DEFAULT '',
+
+    -- Revision tracking
+    revision_count INTEGER DEFAULT 0,
+    revision_notes TEXT DEFAULT '',
+
+    -- Publishing
+    ghost_post_id TEXT DEFAULT '',
+    published_url TEXT DEFAULT '',
     published_at TEXT DEFAULT '',
-    suggested_title TEXT DEFAULT '',
-    internal_links TEXT DEFAULT '[]',
-    external_links TEXT DEFAULT '[]'
+    social_status TEXT DEFAULT '',
+
+    -- SEO monitoring
+    last_gsc_position REAL DEFAULT 0.0,
+    last_gsc_impressions INTEGER DEFAULT 0,
+    last_gsc_clicks INTEGER DEFAULT 0,
+    last_gsc_ctr REAL DEFAULT 0.0,
+    refresh_priority TEXT DEFAULT '',
+    cannibalization_flag INTEGER DEFAULT 0,
+
+    -- Timestamps
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_articles_status ON articles(status);
-CREATE INDEX IF NOT EXISTS idx_articles_keyword ON articles(keyword);
+CREATE INDEX IF NOT EXISTS idx_articles_target_keyword ON articles(target_keyword);
 CREATE INDEX IF NOT EXISTS idx_articles_writer_claim ON articles(writer_claim);
 
 CREATE TABLE IF NOT EXISTS opportunities (
@@ -185,6 +247,19 @@ CREATE TABLE IF NOT EXISTS social_posts (
 CREATE INDEX IF NOT EXISTS idx_social_article ON social_posts(article_id);
 """
 
+# Pipeline-specific columns that may be missing if the articles table
+# was originally created by content_quality.db.init_database().
+_PIPELINE_COLUMN_MIGRATIONS = {
+    "content_brief": "TEXT DEFAULT ''",
+    "search_volume": "INTEGER DEFAULT 0",
+    "keyword_difficulty": "REAL DEFAULT 0.0",
+    "commercial_intent": "REAL DEFAULT 0.0",
+    "content_category": "TEXT DEFAULT ''",
+    "suggested_title": "TEXT DEFAULT ''",
+    "internal_links": "TEXT DEFAULT '[]'",
+    "external_links": "TEXT DEFAULT '[]'",
+}
+
 
 class Database:
     """SQLite-backed shared state replacing Notion."""
@@ -196,6 +271,15 @@ class Database:
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.executescript(SCHEMA_SQL)
+            self._run_article_migrations(conn)
+
+    def _run_article_migrations(self, conn: sqlite3.Connection) -> None:
+        """Add pipeline-specific columns if missing (e.g. table was created by content_quality)."""
+        cursor = conn.execute("PRAGMA table_info(articles)")
+        existing = {row[1] for row in cursor.fetchall()}
+        for col, col_type in _PIPELINE_COLUMN_MIGRATIONS.items():
+            if col not in existing:
+                conn.execute(f"ALTER TABLE articles ADD COLUMN {col} {col_type}")
 
     @contextmanager
     def _connect(self) -> Generator[sqlite3.Connection, None, None]:
@@ -224,27 +308,32 @@ class Database:
 
     def create_article(self, **kwargs) -> Article:
         article = Article(**kwargs)
-        if not article.id:
-            article.id = self._new_id()
         now = self._now()
         article.created_at = article.created_at or now
         article.updated_at = now
 
         d = asdict(article)
+        # Let SQLite autoincrement handle the id
+        d.pop("id", None)
+
         cols = ", ".join(d.keys())
         placeholders = ", ".join("?" for _ in d)
         with self._connect() as conn:
-            conn.execute(f"INSERT INTO articles ({cols}) VALUES ({placeholders})", list(d.values()))
+            cursor = conn.execute(
+                f"INSERT INTO articles ({cols}) VALUES ({placeholders})",
+                list(d.values()),
+            )
+            article.id = cursor.lastrowid
         return article
 
-    def get_article(self, article_id: str) -> Article | None:
+    def get_article(self, article_id: int) -> Article | None:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
         if row is None:
             return None
-        return Article(**dict(row))
+        return self._row_to_article(row)
 
-    def update_article(self, article_id: str, **kwargs) -> Article | None:
+    def update_article(self, article_id: int, **kwargs) -> Article | None:
         kwargs["updated_at"] = self._now()
         sets = ", ".join(f"{k} = ?" for k in kwargs)
         vals = list(kwargs.values()) + [article_id]
@@ -273,7 +362,7 @@ class Database:
 
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-        return [Article(**dict(r)) for r in rows]
+        return [self._row_to_article(r) for r in rows]
 
     def count_articles(self, status: str | None = None) -> int:
         if status:
@@ -289,10 +378,26 @@ class Database:
         """Get all articles with status 'done' — used for internal linking."""
         return self.query_articles(status=ArticleStatus.DONE.value, limit=1000)
 
+    @staticmethod
+    def _row_to_article(row: sqlite3.Row) -> Article:
+        """Convert a DB row to an Article, ignoring unknown columns."""
+        known = _get_article_fields()
+        d = {k: v for k, v in dict(row).items() if k in known}
+        # Coerce None → default for non-nullable dataclass fields
+        for k, v in d.items():
+            if v is None:
+                if isinstance(getattr(Article, k, None), int):
+                    d[k] = 0
+                elif isinstance(getattr(Article, k, None), float):
+                    d[k] = 0.0
+                else:
+                    d[k] = ""
+        return Article(**d)
+
     # ── Claim Locking ────────────────────────────────────────
 
     def try_claim(
-        self, article_id: str, claim_field: str, claim_id: str, new_status: str
+        self, article_id: int, claim_field: str, claim_id: str, new_status: str
     ) -> bool:
         """Attempt to claim an article. Returns True if successful."""
         with self._connect() as conn:
@@ -438,7 +543,7 @@ class Database:
                    ORDER BY updated_at ASC""",
                 (cutoff, ArticleStatus.BACKLOG.value, ArticleStatus.DONE.value, ArticleStatus.AMPLIFIED.value),
             ).fetchall()
-        return [Article(**dict(r)) for r in rows]
+        return [self._row_to_article(r) for r in rows]
 
     def get_articles_published_this_week(self) -> list[Article]:
         """Get articles published in the current week."""
@@ -449,4 +554,4 @@ class Database:
                 "SELECT * FROM articles WHERE status = ? AND published_at >= ?",
                 (ArticleStatus.DONE.value, week_ago),
             ).fetchall()
-        return [Article(**dict(r)) for r in rows]
+        return [self._row_to_article(r) for r in rows]

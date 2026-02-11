@@ -110,7 +110,7 @@ class SageAgent(BaseAgent):
         total_score = 0.0
         all_issues: list[str] = []
 
-        content = article.content or ""
+        content = article.markdown_content or ""
 
         # 1. Plagiarism check (20 pts) — uses Copyscape if available, else skip
         plag_score, plag_issues = self._check_plagiarism(content)
@@ -124,7 +124,7 @@ class SageAgent(BaseAgent):
         seo_raw, seo_issues = score_seo(
             content=content,
             title=article.title,
-            keyword=article.keyword,
+            keyword=article.target_keyword,
             meta_description=article.meta_description,
             internal_links=internal_links,
             external_links=external_links,

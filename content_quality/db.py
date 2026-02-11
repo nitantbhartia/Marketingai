@@ -246,21 +246,30 @@ def init_database():
 def _run_migrations(db):
     """Run database migrations for schema changes."""
     try:
-        # Check if word_count column exists, add if missing
         cursor = db.execute("PRAGMA table_info(articles)")
-        columns = [row[1] for row in cursor.fetchall()]
+        columns = {row[1] for row in cursor.fetchall()}
 
-        print(f"DEBUG: Existing columns in articles table: {columns}")
+        # Columns that may be missing in older databases
+        migrations = {
+            "word_count": "INTEGER DEFAULT 0",
+            # Pipeline-specific columns (used by Scout/Quill/Sage agents)
+            "content_brief": "TEXT DEFAULT ''",
+            "search_volume": "INTEGER DEFAULT 0",
+            "keyword_difficulty": "REAL DEFAULT 0.0",
+            "commercial_intent": "REAL DEFAULT 0.0",
+            "content_category": "TEXT DEFAULT ''",
+            "suggested_title": "TEXT DEFAULT ''",
+            "internal_links": "TEXT DEFAULT '[]'",
+            "external_links": "TEXT DEFAULT '[]'",
+        }
 
-        if 'word_count' not in columns:
-            print("DEBUG: word_count column missing, adding it...")
-            db.execute("ALTER TABLE articles ADD COLUMN word_count INTEGER DEFAULT 0")
-            db.commit()  # Explicit commit
-            print("✓ Added word_count column to articles table")
-        else:
-            print("✓ word_count column already exists")
+        for col, col_type in migrations.items():
+            if col not in columns:
+                db.execute(f"ALTER TABLE articles ADD COLUMN {col} {col_type}")
+                print(f"  ✓ Added {col} column to articles table")
+
     except Exception as e:
-        print(f"❌ Migration error: {e}")
+        print(f"Migration error: {e}")
         import traceback
         traceback.print_exc()
 

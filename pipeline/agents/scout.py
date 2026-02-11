@@ -31,7 +31,7 @@ class ScoutAgent(BaseAgent):
 
         # Get existing keywords to avoid duplicates
         all_articles = self.db.query_articles(limit=5000)
-        existing_keywords = {a.keyword.lower() for a in all_articles if a.keyword}
+        existing_keywords = {a.target_keyword.lower() for a in all_articles if a.target_keyword}
 
         # Phase 1: Seed topics (always available, no API needed)
         topics = get_all_seed_topics()
@@ -50,7 +50,7 @@ class ScoutAgent(BaseAgent):
             self.db.create_article(
                 title=topic.get("suggested_title", ""),
                 status=ArticleStatus.BACKLOG.value,
-                keyword=kw,
+                target_keyword=kw,
                 search_volume=topic.get("volume", 0),
                 keyword_difficulty=topic.get("difficulty", 0.0),
                 commercial_intent=topic.get("intent", 0.0),
@@ -82,7 +82,7 @@ class ScoutAgent(BaseAgent):
 
                 self.db.create_article(
                     status=ArticleStatus.BACKLOG.value,
-                    keyword=kw,
+                    target_keyword=kw,
                     search_volume=100,  # Estimated
                     keyword_difficulty=0.25,
                     commercial_intent=0.7,
@@ -103,8 +103,8 @@ class ScoutAgent(BaseAgent):
                 if article.content_brief and len(article.content_brief) > 200 and not article.content_brief.startswith("Write a comprehensive"):
                     continue
                 try:
-                    brief = self._ai_generate_brief(article.keyword, article.content_category)
-                    title = self._ai_suggest_title(article.keyword)
+                    brief = self._ai_generate_brief(article.target_keyword, article.content_category)
+                    title = self._ai_suggest_title(article.target_keyword)
                     self.db.update_article(
                         article.id,
                         content_brief=brief,

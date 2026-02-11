@@ -174,7 +174,7 @@ def list_articles(ctx, article_status, limit):
 
     for a in articles:
         title = (a.title or a.suggested_title or "")[:38]
-        keyword = (a.keyword or "")[:38]
+        keyword = (a.target_keyword or "")[:38]
         click.echo(f"  {a.id:<14} {a.status:<18} {keyword:<40} {title:<40}")
 
     click.echo(f"\n  Total: {len(articles)} articles\n")
@@ -196,7 +196,7 @@ def show(ctx, article_id):
     click.echo("  " + "=" * 50)
     click.echo(f"  Title:         {article.title}")
     click.echo(f"  Status:        {article.status}")
-    click.echo(f"  Keyword:       {article.keyword}")
+    click.echo(f"  Keyword:       {article.target_keyword}")
     click.echo(f"  Category:      {article.content_category}")
     click.echo(f"  Target State:  {article.target_state}")
     click.echo(f"  Word Count:    {article.word_count}")
@@ -213,8 +213,8 @@ def show(ctx, article_id):
     if article.revision_notes:
         click.echo(f"\n  Revision Notes:\n{article.revision_notes}")
 
-    if article.content:
-        preview = article.content[:500]
+    if article.markdown_content:
+        preview = article.markdown_content[:500]
         click.echo(f"\n  Content Preview:\n  {preview}...")
 
     click.echo()
@@ -257,7 +257,7 @@ def promote(ctx, count):
     promoted = 0
     for article in backlog:
         db.update_article(article.id, status=ArticleStatus.TODO.value)
-        click.echo(f"  Promoted: {article.keyword}")
+        click.echo(f"  Promoted: {article.target_keyword}")
         promoted += 1
 
     click.echo(f"\nPromoted {promoted} topics to 'todo'")
