@@ -18,7 +18,7 @@ from pipeline.agents.base import Agent
 from content_quality.db import get_db, claim_article, release_claim, add_cta_variant, log_agent_action
 
 
-class Ezra(Agent):
+class EzraAgent(Agent):
     """
     Publisher agent - publishes articles to static files.
 
