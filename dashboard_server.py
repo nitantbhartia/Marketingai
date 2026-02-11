@@ -352,11 +352,13 @@ async def health_check():
 async def trigger_scout():
     """Manually trigger Scout agent to create topics."""
     try:
-        from pipeline.cli import run_agent
-        from pipeline.config import load_config
+        from pipeline.scheduler import run_agent
+        from pipeline.config import Config
+        from pipeline.db import Database
 
-        config = load_config()
-        result = run_agent("scout", config)
+        cfg = Config.load()
+        db = Database(cfg.resolve_path(cfg.pipeline.database_path))
+        result = run_agent("scout", cfg, db)
 
         return {
             "status": "success",
@@ -364,10 +366,12 @@ async def trigger_scout():
             "result": result
         }
     except Exception as e:
+        import traceback
         return {
             "status": "error",
             "agent": "scout",
-            "error": str(e)
+            "error": str(e),
+            "traceback": traceback.format_exc()
         }
 
 
@@ -375,11 +379,13 @@ async def trigger_scout():
 async def trigger_quill():
     """Manually trigger Quill agent to write articles."""
     try:
-        from pipeline.cli import run_agent
-        from pipeline.config import load_config
+        from pipeline.scheduler import run_agent
+        from pipeline.config import Config
+        from pipeline.db import Database
 
-        config = load_config()
-        result = run_agent("quill", config)
+        cfg = Config.load()
+        db = Database(cfg.resolve_path(cfg.pipeline.database_path))
+        result = run_agent("quill", cfg, db)
 
         return {
             "status": "success",
@@ -387,10 +393,12 @@ async def trigger_quill():
             "result": result
         }
     except Exception as e:
+        import traceback
         return {
             "status": "error",
             "agent": "quill",
-            "error": str(e)
+            "error": str(e),
+            "traceback": traceback.format_exc()
         }
 
 
@@ -398,11 +406,13 @@ async def trigger_quill():
 async def trigger_sage():
     """Manually trigger Sage agent to review articles."""
     try:
-        from pipeline.cli import run_agent
-        from pipeline.config import load_config
+        from pipeline.scheduler import run_agent
+        from pipeline.config import Config
+        from pipeline.db import Database
 
-        config = load_config()
-        result = run_agent("sage", config)
+        cfg = Config.load()
+        db = Database(cfg.resolve_path(cfg.pipeline.database_path))
+        result = run_agent("sage", cfg, db)
 
         return {
             "status": "success",
@@ -410,10 +420,12 @@ async def trigger_sage():
             "result": result
         }
     except Exception as e:
+        import traceback
         return {
             "status": "error",
             "agent": "sage",
-            "error": str(e)
+            "error": str(e),
+            "traceback": traceback.format_exc()
         }
 
 
