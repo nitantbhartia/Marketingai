@@ -431,49 +431,52 @@ async def trigger_sage():
 
 @app.get("/trigger/brief-topics")
 async def brief_topics():
-    """AI-brief topics that have generic briefs."""
+    """AI-brief topics that have generic briefs - using content_quality.db schema."""
     try:
-        from pipeline.config import Config
-        from pipeline.db import Database, ArticleStatus
+        from content_quality.db import get_db
+        from content_quality.config import DATABASE_PATH
         from anthropic import Anthropic
         import os
 
-        cfg = Config.load()
-        db_path = cfg.resolve_path(cfg.pipeline.database_path)
-        db = Database(db_path)
-
         # Debug info
         debug = {
-            "db_path": str(db_path),
+            "db_path": DATABASE_PATH,
             "db_path_env": os.getenv("DATABASE_PATH"),
-            "db_exists": os.path.exists(db_path),
-            "total_articles": db.count_articles(),
+            "db_exists": os.path.exists(DATABASE_PATH),
         }
 
-        if not cfg.anthropic.api_key:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
             return {
                 "status": "error",
                 "error": "ANTHROPIC_API_KEY not configured",
                 "debug": debug
             }
 
-        client = Anthropic(api_key=cfg.anthropic.api_key)
+        client = Anthropic(api_key=api_key)
 
-        # Find topics with generic briefs
-        articles = db.query_articles(status=ArticleStatus.BACKLOG.value, limit=50)
+        # Find topics with generic/short briefs using content_quality.db
+        with get_db() as db:
+            cursor = db.execute("""
+                SELECT id, title, target_keyword, target_state, markdown_content
+                FROM articles
+                WHERE status = 'backlog'
+                  AND (markdown_content IS NULL OR length(markdown_content) < 200
+                       OR markdown_content LIKE 'Write a comprehensive%')
+                LIMIT 50
+            """)
+            articles = cursor.fetchall()
+
         debug["backlog_found"] = len(articles)
         briefed = 0
         errors = []
 
         for article in articles:
-            # Brief if has generic/short brief
-            if not article.content_brief or len(article.content_brief) < 200 or article.content_brief.startswith("Write a comprehensive"):
-                try:
-                    # Generate AI brief
-                    prompt = f"""Create a detailed content brief for an article about: {article.keyword}
+            try:
+                # Generate AI brief
+                prompt = f"""Create a detailed content brief for an article about: {article['target_keyword']}
 
-Target state: {article.target_state or 'General US'}
-Category: {article.content_category or 'Insurance settlement'}
+Target state: {article['target_state'] or 'General US'}
 
 Provide:
 1. Article angle/hook
@@ -484,24 +487,27 @@ Provide:
 
 Format as a clear, actionable brief for a writer."""
 
-                    response = client.messages.create(
-                        model="claude-haiku-4-5-20251001",
-                        max_tokens=1000,
-                        messages=[{"role": "user", "content": prompt}]
+                response = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=1000,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+
+                brief = response.content[0].text
+
+                # Update using content_quality.db
+                with get_db() as db:
+                    db.execute(
+                        "UPDATE articles SET markdown_content = ? WHERE id = ?",
+                        (brief, article['id'])
                     )
 
-                    brief = response.content[0].text
+                briefed += 1
 
-                    db.update_article(
-                        article.id,
-                        content_brief=brief
-                    )
-                    briefed += 1
-
-                    if briefed >= 10:
-                        break
-                except Exception as e:
-                    errors.append(f"Article {article.id}: {str(e)}")
+                if briefed >= 10:
+                    break
+            except Exception as e:
+                errors.append(f"Article {article['id']}: {str(e)}")
 
         return {
             "status": "success",
