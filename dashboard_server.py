@@ -552,3 +552,39 @@ if __name__ == "__main__":
         port=port,
         log_level="info"
     )
+
+@app.get("/debug/database")
+async def debug_database():
+    """Debug endpoint to see what's in the database."""
+    from content_quality.db import get_db
+    from content_quality.config import DATABASE_PATH
+    import os
+    
+    with get_db() as db:
+        # Get tables
+        cursor = db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+        
+        # Get total articles
+        total = 0
+        status_counts = {}
+        sample_articles = []
+        
+        if 'articles' in tables:
+            cursor = db.execute("SELECT COUNT(*) FROM articles")
+            total = cursor.fetchone()[0]
+            
+            cursor = db.execute("SELECT status, COUNT(*) FROM articles GROUP BY status")
+            status_counts = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            cursor = db.execute("SELECT id, title, target_keyword, status FROM articles LIMIT 5")
+            sample_articles = [dict(row) for row in cursor.fetchall()]
+    
+    return {
+        "db_path": DATABASE_PATH,
+        "db_exists": os.path.exists(DATABASE_PATH),
+        "tables": tables,
+        "total_articles": total,
+        "status_counts": status_counts,
+        "sample_articles": sample_articles
+    }
