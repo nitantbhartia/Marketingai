@@ -98,7 +98,9 @@ class ScoutAgent(BaseAgent):
         briefed = 0
         if self.config.anthropic.api_key:
             for article in unbriefed:
-                if article.content_brief and len(article.content_brief) > 50:
+                # Skip if already has a detailed AI-generated brief
+                # (AI briefs are longer and don't start with generic phrases)
+                if article.content_brief and len(article.content_brief) > 200 and not article.content_brief.startswith("Write a comprehensive"):
                     continue
                 try:
                     brief = self._ai_generate_brief(article.keyword, article.content_category)
@@ -106,7 +108,7 @@ class ScoutAgent(BaseAgent):
                     self.db.update_article(
                         article.id,
                         content_brief=brief,
-                        suggested_title=title,
+                        title=title,
                     )
                     briefed += 1
                 except Exception as e:
