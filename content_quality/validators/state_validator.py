@@ -6,7 +6,7 @@ Cross-references against STATE_RULES.md.
 """
 
 import re
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 from pathlib import Path
 
 from content_quality.config import STATE_RULES_PATH

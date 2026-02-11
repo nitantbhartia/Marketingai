@@ -245,13 +245,24 @@ def init_database():
 
 def _run_migrations(db):
     """Run database migrations for schema changes."""
-    # Check if word_count column exists, add if missing
-    cursor = db.execute("PRAGMA table_info(articles)")
-    columns = [row[1] for row in cursor.fetchall()]
+    try:
+        # Check if word_count column exists, add if missing
+        cursor = db.execute("PRAGMA table_info(articles)")
+        columns = [row[1] for row in cursor.fetchall()]
 
-    if 'word_count' not in columns:
-        db.execute("ALTER TABLE articles ADD COLUMN word_count INTEGER DEFAULT 0")
-        print("✓ Added word_count column to articles table")
+        print(f"DEBUG: Existing columns in articles table: {columns}")
+
+        if 'word_count' not in columns:
+            print("DEBUG: word_count column missing, adding it...")
+            db.execute("ALTER TABLE articles ADD COLUMN word_count INTEGER DEFAULT 0")
+            db.commit()  # Explicit commit
+            print("✓ Added word_count column to articles table")
+        else:
+            print("✓ word_count column already exists")
+    except Exception as e:
+        print(f"❌ Migration error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def claim_article(article_id: int, claim_field: str, claim_id: str) -> bool:
