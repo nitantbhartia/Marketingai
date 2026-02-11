@@ -47,42 +47,61 @@ recent_notifications = []
 async def dashboard(request: Request):
     """Main dashboard showing all articles in review."""
 
-    # Get articles needing review
-    with get_db() as db:
-        cursor = db.execute("""
-            SELECT id, title, slug, target_keyword, target_state,
-                   status, seo_score, readability_score,
-                   validation_status, validation_notes,
-                   word_count, created_at, updated_at,
-                   writer_claim, editor_claim
-            FROM articles
-            WHERE status IN ('review', 'ready_to_publish', 'revision')
-            ORDER BY
-                CASE status
-                    WHEN 'ready_to_publish' THEN 1
-                    WHEN 'review' THEN 2
-                    WHEN 'revision' THEN 3
-                END,
-                updated_at DESC
-        """)
-        articles = [dict(row) for row in cursor.fetchall()]
+    try:
+        # Get articles needing review
+        with get_db() as db:
+            cursor = db.execute("""
+                SELECT id, title, slug, target_keyword, target_state,
+                       status, seo_score, readability_score,
+                       validation_status, validation_notes,
+                       word_count, created_at, updated_at,
+                       writer_claim, editor_claim
+                FROM articles
+                WHERE status IN ('review', 'ready_to_publish', 'revision')
+                ORDER BY
+                    CASE status
+                        WHEN 'ready_to_publish' THEN 1
+                        WHEN 'review' THEN 2
+                        WHEN 'revision' THEN 3
+                    END,
+                    updated_at DESC
+            """)
+            articles = [dict(row) for row in cursor.fetchall()]
 
-    # Get summary stats
-    with get_db() as db:
-        cursor = db.execute("""
-            SELECT status, COUNT(*) as count
-            FROM articles
-            GROUP BY status
-        """)
-        status_counts = {row[0]: row[1] for row in cursor.fetchall()}
+        # Get summary stats
+        with get_db() as db:
+            cursor = db.execute("""
+                SELECT status, COUNT(*) as count
+                FROM articles
+                GROUP BY status
+            """)
+            status_counts = {row[0]: row[1] for row in cursor.fetchall()}
 
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "articles": articles,
-        "status_counts": status_counts,
-        "recent_notifications": recent_notifications[-10:],  # Last 10
-        "now": datetime.now()
-    })
+        return templates.TemplateResponse("dashboard.html", {
+            "request": request,
+            "articles": articles,
+            "status_counts": status_counts,
+            "recent_notifications": recent_notifications[-10:],  # Last 10
+            "now": datetime.now()
+        })
+    except Exception as e:
+        # Return error page with details
+        import traceback
+        error_details = traceback.format_exc()
+        return HTMLResponse(
+            content=f"""
+            <html>
+                <head><title>Dashboard Error</title></head>
+                <body style="font-family: monospace; padding: 20px;">
+                    <h1>Dashboard Error</h1>
+                    <p><strong>Error:</strong> {str(e)}</p>
+                    <h2>Full Traceback:</h2>
+                    <pre>{error_details}</pre>
+                </body>
+            </html>
+            """,
+            status_code=500
+        )
 
 
 @app.get("/article/{article_id}", response_class=HTMLResponse)
