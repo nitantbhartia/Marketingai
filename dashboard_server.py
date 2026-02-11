@@ -347,6 +347,76 @@ async def health_check():
     }
 
 
+# Manual agent trigger endpoints
+@app.get("/trigger/scout")
+async def trigger_scout():
+    """Manually trigger Scout agent to create topics."""
+    try:
+        from pipeline.cli import run_agent
+        from pipeline.config import load_config
+
+        config = load_config()
+        result = run_agent("scout", config)
+
+        return {
+            "status": "success",
+            "agent": "scout",
+            "result": result
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "agent": "scout",
+            "error": str(e)
+        }
+
+
+@app.get("/trigger/quill")
+async def trigger_quill():
+    """Manually trigger Quill agent to write articles."""
+    try:
+        from pipeline.cli import run_agent
+        from pipeline.config import load_config
+
+        config = load_config()
+        result = run_agent("quill", config)
+
+        return {
+            "status": "success",
+            "agent": "quill",
+            "result": result
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "agent": "quill",
+            "error": str(e)
+        }
+
+
+@app.get("/trigger/sage")
+async def trigger_sage():
+    """Manually trigger Sage agent to review articles."""
+    try:
+        from pipeline.cli import run_agent
+        from pipeline.config import load_config
+
+        config = load_config()
+        result = run_agent("sage", config)
+
+        return {
+            "status": "success",
+            "agent": "sage",
+            "result": result
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "agent": "sage",
+            "error": str(e)
+        }
+
+
 if __name__ == "__main__":
     import argparse
     import os
