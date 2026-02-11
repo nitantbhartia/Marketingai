@@ -429,6 +429,83 @@ async def trigger_sage():
         }
 
 
+@app.get("/trigger/brief-topics")
+async def brief_topics():
+    """AI-brief topics that have generic briefs."""
+    try:
+        from pipeline.config import Config
+        from pipeline.db import Database, ArticleStatus
+        from anthropic import Anthropic
+
+        cfg = Config.load()
+        db = Database(cfg.resolve_path(cfg.pipeline.database_path))
+
+        if not cfg.anthropic.api_key:
+            return {
+                "status": "error",
+                "error": "ANTHROPIC_API_KEY not configured"
+            }
+
+        client = Anthropic(api_key=cfg.anthropic.api_key)
+
+        # Find topics with generic briefs
+        articles = db.query_articles(status=ArticleStatus.BACKLOG.value, limit=50)
+        briefed = 0
+        errors = []
+
+        for article in articles:
+            # Brief if has generic/short brief
+            if not article.content_brief or len(article.content_brief) < 200 or article.content_brief.startswith("Write a comprehensive"):
+                try:
+                    # Generate AI brief
+                    prompt = f"""Create a detailed content brief for an article about: {article.keyword}
+
+Target state: {article.target_state or 'General US'}
+Category: {article.content_category or 'Insurance settlement'}
+
+Provide:
+1. Article angle/hook
+2. Key points to cover (5-7 bullet points)
+3. Target word count: 1800-2000
+4. SEO focus
+5. Unique value proposition
+
+Format as a clear, actionable brief for a writer."""
+
+                    response = client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=1000,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+
+                    brief = response.content[0].text
+
+                    db.update_article(
+                        article.id,
+                        content_brief=brief
+                    )
+                    briefed += 1
+
+                    if briefed >= 10:
+                        break
+                except Exception as e:
+                    errors.append(f"Article {article.id}: {str(e)}")
+
+        return {
+            "status": "success",
+            "briefed": briefed,
+            "checked": len(articles),
+            "errors": errors if errors else None
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
 if __name__ == "__main__":
     import argparse
     import os
