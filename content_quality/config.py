@@ -14,7 +14,7 @@ REFERENCE_DIR = PROJECT_ROOT / "reference"
 DATA_DIR.mkdir(exist_ok=True)
 
 # SQLite (local database — co-located on Railway)
-DATABASE_PATH = os.environ.get("DATABASE_PATH", str(DATA_DIR / "claimcoach_content.db"))
+DATABASE_PATH = os.environ.get("DATABASE_PATH", "pipeline.db")
 
 # Blog publishing (static files)
 BLOG_OUTPUT_DIR = os.environ.get("BLOG_OUTPUT_DIR", "./blog")
