@@ -6,6 +6,7 @@ Receives POST notifications when articles are ready for review.
 """
 
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -18,17 +19,21 @@ from fastapi.templating import Jinja2Templates
 from content_quality.db import get_db, log_agent_action, init_database
 from content_quality.config import DATABASE_PATH, API_PORT
 
-app = FastAPI(
-    title="ClaimCoach Review Dashboard",
-    description="Review and approve content before publishing",
-    version="1.0.0"
-)
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """Initialize database on startup."""
     init_database()
     print(f"✓ Database initialized at {DATABASE_PATH}")
+    yield
+
+
+app = FastAPI(
+    title="ClaimCoach Review Dashboard",
+    description="Review and approve content before publishing",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"
