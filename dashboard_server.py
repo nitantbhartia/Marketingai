@@ -436,20 +436,32 @@ async def brief_topics():
         from pipeline.config import Config
         from pipeline.db import Database, ArticleStatus
         from anthropic import Anthropic
+        import os
 
         cfg = Config.load()
-        db = Database(cfg.resolve_path(cfg.pipeline.database_path))
+        db_path = cfg.resolve_path(cfg.pipeline.database_path)
+        db = Database(db_path)
+
+        # Debug info
+        debug = {
+            "db_path": str(db_path),
+            "db_path_env": os.getenv("DATABASE_PATH"),
+            "db_exists": os.path.exists(db_path),
+            "total_articles": db.count_articles(),
+        }
 
         if not cfg.anthropic.api_key:
             return {
                 "status": "error",
-                "error": "ANTHROPIC_API_KEY not configured"
+                "error": "ANTHROPIC_API_KEY not configured",
+                "debug": debug
             }
 
         client = Anthropic(api_key=cfg.anthropic.api_key)
 
         # Find topics with generic briefs
         articles = db.query_articles(status=ArticleStatus.BACKLOG.value, limit=50)
+        debug["backlog_found"] = len(articles)
         briefed = 0
         errors = []
 
@@ -495,7 +507,8 @@ Format as a clear, actionable brief for a writer."""
             "status": "success",
             "briefed": briefed,
             "checked": len(articles),
-            "errors": errors if errors else None
+            "errors": errors if errors else None,
+            "debug": debug
         }
     except Exception as e:
         import traceback
