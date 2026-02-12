@@ -29,10 +29,46 @@ _TIER_LIMITS: dict[str, str] = {
     "gemini-2.5-flash-lite": "flash_lite_daily_budget",
 }
 
+# --------------------------------------------------------------------------
+# Token-per-minute (TPM) tracker — prevents 429s on the 250k TPM limit
+# --------------------------------------------------------------------------
+_token_lock = threading.Lock()
+_token_window: list[tuple[float, int]] = []  # (timestamp, token_count) entries
+_TPM_LIMIT = 250_000  # Gemini free tier TPM limit
+_TPM_WINDOW = 60.0    # 60-second sliding window
+_TPM_PARK_SECONDS = 30.0  # How long to park when approaching limit
+
 
 def _budget_key(model: str) -> str:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return f"{model}:{today}"
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token for English text."""
+    return max(1, len(text) // 4)
+
+
+def _record_tokens(count: int) -> None:
+    """Record token usage in the sliding window."""
+    now = time.time()
+    with _token_lock:
+        _token_window.append((now, count))
+        # Prune entries older than the window
+        cutoff = now - _TPM_WINDOW
+        while _token_window and _token_window[0][0] < cutoff:
+            _token_window.pop(0)
+
+
+def _tokens_in_window() -> int:
+    """Get total tokens used in the current sliding window."""
+    now = time.time()
+    cutoff = now - _TPM_WINDOW
+    with _token_lock:
+        # Prune stale entries
+        while _token_window and _token_window[0][0] < cutoff:
+            _token_window.pop(0)
+        return sum(count for _, count in _token_window)
 
 
 class BaseAgent(ABC):
@@ -260,6 +296,17 @@ class BaseAgent(ABC):
         if not api_key:
             raise ValueError("Gemini API key not configured")
 
+        # ── TPM gate: park if approaching the 250k token-per-minute limit ──
+        estimated_prompt_tokens = _estimate_tokens(prompt + (system or ""))
+        current_tpm = _tokens_in_window()
+        if current_tpm + estimated_prompt_tokens > _TPM_LIMIT * 0.85:
+            self.logger.info(
+                f"TPM gate: {current_tpm:,} tokens in window "
+                f"(+{estimated_prompt_tokens:,} pending), "
+                f"parking {_TPM_PARK_SECONDS:.0f}s"
+            )
+            time.sleep(_TPM_PARK_SECONDS)
+
         # ── Rate limiter: enforce minimum delay between Gemini calls ──
         min_delay = getattr(self.config.gemini, "rate_limit_delay", 12.0)
         with _gemini_lock:
@@ -328,9 +375,13 @@ class BaseAgent(ABC):
 
                 text = candidates[0]["content"]["parts"][0]["text"]
                 self._record_budget_usage(model_name)
+                # Track tokens for TPM sliding window
+                total_tokens = estimated_prompt_tokens + _estimate_tokens(text)
+                _record_tokens(total_tokens)
                 self.logger.debug(
                     f"Gemini response length={len(text)} "
-                    f"[{model_name} budget: {_budget_counters.get(_budget_key(model_name), 0)}]"
+                    f"[{model_name} budget: {_budget_counters.get(_budget_key(model_name), 0)}, "
+                    f"TPM window: {_tokens_in_window():,}]"
                 )
                 return text
             except urllib.error.HTTPError as e:

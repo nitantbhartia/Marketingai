@@ -221,9 +221,13 @@ class QuillAgent(BaseAgent):
                 return result
             # Fall through to full rewrite if targeted revision fails
 
+        # ── Phase 0: Entity mapping (E-E-A-T knowledge graph) ──
+        entity_map = self._extract_entities(article)
+
         # ── Phase 1: Generate outline ──
         outline = self._generate_outline(
             article, product_context, state_rules, internal_links_context,
+            entity_map=entity_map,
         )
 
         # ── Phase 2: Write article (section-by-section from outline) ──
@@ -246,6 +250,9 @@ class QuillAgent(BaseAgent):
         try:
             content, meta_description = self._parse_result(result_text)
             title = article.suggested_title or article.title or article.target_keyword.title()
+
+            # ── Phase 2.5: Contrastive critique (anti-AI-laziness) ──
+            content = self._contrastive_critique(content, article)
 
             # ── Phase 3: Self-review & auto-fix ──
             content, meta_description, fixes = self._self_review_and_fix(
@@ -330,11 +337,66 @@ class QuillAgent(BaseAgent):
         }
 
     # ------------------------------------------------------------------
+    # Phase 0: Entity mapping (E-E-A-T knowledge graph)
+    # ------------------------------------------------------------------
+    def _extract_entities(self, article) -> str:
+        """Entity Mapper — extract key insurance/legal entities for E-E-A-T.
+
+        Uses Flash to identify the precise legal and insurance terminology
+        that should appear in the article. This ensures the writer uses
+        authoritative language that signals expertise to Google.
+
+        Returns a structured entity map string to inject into the outline
+        prompt, or empty string if extraction fails.
+        """
+        if not self.has_llm:
+            return ""
+
+        keyword = article.target_keyword or ""
+        state = article.target_state or ""
+        category = article.content_category or ""
+
+        prompt = f"""You are an insurance domain expert building a knowledge graph for SEO content.
+
+For an article about "{keyword}"{f' in {state}' if state else ''} (category: {category or 'general'}):
+
+Extract the key ENTITIES that must appear in this article for E-E-A-T authority.
+Group them into categories:
+
+1. **Legal Terms** — statutes, regulations, legal concepts (e.g., "Actual Cash Value", "diminished value", "bad faith")
+2. **Insurance Concepts** — industry terms the reader needs to understand (e.g., "subrogation", "total loss threshold", "comparable vehicles")
+3. **Processes** — specific procedures to reference (e.g., "appraisal clause", "DOI complaint", "demand letter")
+4. **Data Points** — specific numbers, ranges, or benchmarks to include (e.g., "typical 10-20% undervaluation", "75% threshold in CA")
+5. **Authoritative Sources** — organizations or references to cite (e.g., "NAIC", "state DOI", "CCC ONE")
+
+Return 3-5 entities per category. Be specific to "{keyword}" — generic terms that apply to any article are not useful.
+
+Format as a clean list:
+LEGAL: term1, term2, term3
+INSURANCE: term1, term2, term3
+PROCESSES: term1, term2, term3
+DATA_POINTS: point1, point2, point3
+SOURCES: source1, source2, source3"""
+
+        try:
+            result = self.call_claude(
+                prompt=prompt,
+                system="You are an insurance domain expert. Return only the entity map.",
+                model=self.fast_model,
+                max_tokens=500,
+            )
+            logger.debug(f"Entity map for '{keyword}': {len(result)} chars")
+            return result.strip()
+        except Exception as e:
+            logger.warning(f"Entity extraction failed: {e}")
+            return ""
+
+    # ------------------------------------------------------------------
     # Phase 1: Outline generation
     # ------------------------------------------------------------------
     def _generate_outline(
         self, article, product_context: str, state_rules: str,
-        internal_links: str,
+        internal_links: str, entity_map: str = "",
     ) -> str:
         """Generate a structured outline before writing.
 
@@ -346,6 +408,13 @@ class QuillAgent(BaseAgent):
             article.content_category or "", ""
         ).strip()
 
+        entity_section = ""
+        if entity_map:
+            entity_section = (
+                f"\n=== ENTITY MAP (use these terms for E-E-A-T authority) ===\n"
+                f"{entity_map}\n"
+            )
+
         prompt = f"""Create a detailed OUTLINE for an article targeting: "{article.target_keyword}"
 
 Content category: {article.content_category or 'general'}
@@ -356,7 +425,7 @@ Content category: {article.content_category or 'general'}
 {f'Category strategy: {category_hint}' if category_hint else ''}
 
 {f'Internal links available: {internal_links}' if internal_links else ''}
-
+{entity_section}
 Create an outline with:
 1. **Hook** (first 100 words) — how to open with the keyword naturally
 2. **5-7 H2 sections** — each with:
@@ -364,11 +433,13 @@ Create an outline with:
    - 3-4 key points to cover
    - Specific data/examples/dollar amounts to include
    - Which internal articles to link to (if relevant)
+   - Which entities from the entity map to incorporate
 3. **FAQ section** — 3-5 questions with brief answer notes
 4. **CTA section** — how to close with ClaimCoach
 5. **External sources** — 2-3 authoritative sites to reference
 
 Be specific about dollar amounts, timelines, and examples to include.
+Use the entity map terms naturally throughout — these signal expertise to search engines.
 Format as a clean outline with ## headers and bullet points."""
 
         try:
@@ -577,6 +648,98 @@ Format as a clean outline with ## headers and bullet points."""
         )
 
         return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Phase 2.5: Contrastive Critique Loop (anti-AI-laziness)
+    # ------------------------------------------------------------------
+    def _contrastive_critique(self, content: str, article) -> str:
+        """Contrastive Critique Loop — eliminates generic, robotic content.
+
+        A Flash-Lite agent acts as a cynical insurance adjuster, identifying
+        passages that are too generic or sound AI-written. The original
+        drafting model (Flash) then rewrites those sections.
+
+        This costs nearly nothing (~400 Flash-Lite tokens + ~1500 Flash tokens)
+        but dramatically increases the 'human' feel of the content.
+
+        Returns the refined content, or original content on failure.
+        """
+        if not self.has_llm:
+            return content
+
+        keyword = article.target_keyword or ""
+
+        # ── Step 1: Critique (Flash-Lite as cynical adjuster) ──
+        critique_prompt = f"""You are a cynical, experienced insurance adjuster reviewing a blog post about "{keyword}".
+
+You've read thousands of generic insurance articles and you can spot AI-written fluff instantly.
+
+Read this article and identify EXACTLY 3 problems:
+1. The most GENERIC passage that could appear on any insurance website (quote it)
+2. The most ROBOTIC-sounding sentence that no real person would say (quote it)
+3. One place where the article makes a VAGUE claim instead of giving specific numbers or actionable steps (quote it)
+
+For each problem, explain in one sentence WHY it's bad and WHAT would make it better.
+
+Format:
+GENERIC: "[quoted passage]" — [why it's bad and what to replace it with]
+ROBOTIC: "[quoted sentence]" — [why it sounds fake and how a real person would say it]
+VAGUE: "[quoted claim]" — [what specific data or action should replace it]
+
+Article:
+---
+{content[:4000]}
+---"""
+
+        try:
+            critique = self.call_claude(
+                prompt=critique_prompt,
+                system="You are a cynical insurance adjuster. Be brutally honest. Quote exactly from the text.",
+                model=self.utility_model,
+                max_tokens=600,
+            )
+            logger.debug(f"Critique for '{keyword}': {len(critique)} chars")
+
+            if not critique or len(critique) < 50:
+                return content
+
+            # ── Step 2: Refine (Flash rewrites flagged sections) ──
+            refine_prompt = f"""You wrote an article about "{keyword}". A reviewer found these problems:
+
+{critique}
+
+Rewrite the COMPLETE article below, fixing ONLY the 3 flagged issues. Do NOT change anything else.
+For each fix:
+- Replace generic passages with specific, original analysis
+- Replace robotic sentences with natural, conversational language
+- Replace vague claims with specific numbers, dollar amounts, or actionable steps
+
+Output the full article in Markdown. Keep everything that wasn't flagged exactly the same.
+
+Article:
+---
+{content}
+---"""
+
+            refined = self.call_claude(
+                prompt=refine_prompt,
+                system=self._build_system_prompt(article.content_category),
+                model=self.fast_model,
+                max_tokens=8192,
+            )
+
+            # Validate the refinement didn't destroy the article
+            refined_clean = refined.strip()
+            if len(refined_clean) < len(content) * 0.7:
+                logger.warning("Critique refinement shortened article too much, keeping original")
+                return content
+
+            logger.info(f"Contrastive critique applied for '{keyword}'")
+            return refined_clean
+
+        except Exception as e:
+            logger.warning(f"Contrastive critique failed: {e}")
+            return content
 
     # ------------------------------------------------------------------
     # Phase 3: Self-review & auto-fix

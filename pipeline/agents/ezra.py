@@ -248,7 +248,102 @@ class EzraAgent(BaseAgent):
             "button_url": "https://claimcoach.app/newsletter",
         })
 
+        # Context-aware CTA — identify the high-intent moment and inject
+        # a CTA that matches the reader's peak frustration point
+        context_cta = self._generate_context_aware_cta(article)
+        if context_cta:
+            variants.append(context_cta)
+
         return variants
+
+    def _generate_context_aware_cta(self, article) -> dict[str, str] | None:
+        """Use Flash-Lite to find the high-intent moment and create a matching CTA.
+
+        Identifies where the reader feels most frustrated with their insurance
+        company and generates a CTA that speaks directly to that emotion,
+        linking to the most relevant ClaimCoach feature.
+
+        Returns a CTA dict or None if generation fails.
+        """
+        if not self.has_llm:
+            return None
+
+        content = article.markdown_content or ""
+        if len(content) < 500:
+            return None
+
+        keyword = article.target_keyword or ""
+
+        prompt = f"""You are a conversion rate optimization expert for ClaimCoach (claimcoach.app),
+an AI tool that analyzes total loss insurance settlements.
+
+Read this article about "{keyword}" and identify the HIGH-INTENT MOMENT — the paragraph
+where the reader feels MOST frustrated with their insurance company and most likely to take action.
+
+Then create a context-aware CTA that:
+1. Mirrors the specific frustration in that paragraph
+2. Offers ClaimCoach as the immediate next step
+3. Is 1 sentence for the heading, 1-2 sentences for the body text
+
+ClaimCoach features you can link to:
+- https://claimcoach.app — main settlement analyzer
+- https://claimcoach.app/calculator — free settlement calculator
+
+Respond in EXACTLY this format:
+INSERT_AFTER: [quote the H2 heading this CTA should appear after]
+HEADING: [CTA heading, max 10 words]
+TEXT: [CTA body, 1-2 sentences, max 40 words]
+BUTTON: [button text, 2-4 words]
+URL: [one of the URLs above]
+
+Article:
+---
+{content[:3000]}
+---"""
+
+        try:
+            result = self.call_claude(
+                prompt=prompt,
+                system="You are a CRO expert. Return only the formatted CTA.",
+                model=self.utility_model,
+                max_tokens=300,
+            )
+
+            # Parse the structured response
+            cta: dict[str, str] = {"type": "context_aware", "position": "inline"}
+            for line in result.strip().split("\n"):
+                line = line.strip()
+                if line.startswith("INSERT_AFTER:"):
+                    cta["insert_after"] = line.split(":", 1)[1].strip().strip('"')
+                elif line.startswith("HEADING:"):
+                    cta["heading"] = line.split(":", 1)[1].strip()
+                elif line.startswith("TEXT:"):
+                    cta["text"] = line.split(":", 1)[1].strip()
+                elif line.startswith("BUTTON:"):
+                    cta["button_text"] = line.split(":", 1)[1].strip()
+                elif line.startswith("URL:"):
+                    url = line.split(":", 1)[1].strip()
+                    # Only allow claimcoach.app URLs
+                    if "claimcoach.app" in url:
+                        cta["button_url"] = url
+                    else:
+                        cta["button_url"] = "https://claimcoach.app"
+
+            # Validate all required fields are present
+            required = {"heading", "text", "button_text", "button_url"}
+            if required.issubset(cta.keys()):
+                self.logger.info(
+                    f"Generated context-aware CTA: '{cta['heading']}' "
+                    f"after '{cta.get('insert_after', 'unknown')}'"
+                )
+                return cta
+
+            self.logger.debug("Context-aware CTA missing required fields, skipping")
+            return None
+
+        except Exception as e:
+            self.logger.warning(f"Context-aware CTA generation failed: {e}")
+            return None
 
     def _generate_html(self, article, slug: str, cta_variants: list[dict[str, str]]) -> Path:
         """Generate HTML from markdown."""
@@ -261,6 +356,38 @@ class EzraAgent(BaseAgent):
         primary_cta = next((c for c in cta_variants if c["type"] == "primary"), None)
         secondary_cta = next((c for c in cta_variants if c["type"] == "secondary"), None)
         newsletter_cta = next((c for c in cta_variants if c["type"] == "newsletter"), None)
+        context_cta = next((c for c in cta_variants if c["type"] == "context_aware"), None)
+
+        # Inject context-aware CTA into the HTML content at the right position
+        if context_cta and context_cta.get("insert_after"):
+            insert_heading = context_cta["insert_after"]
+            cta_html_block = (
+                f'<div class="cta cta-context-aware">'
+                f'<h3>{context_cta["heading"]}</h3>'
+                f'<p>{context_cta["text"]}</p>'
+                f'<a href="{context_cta["button_url"]}" class="button button-context">'
+                f'{context_cta["button_text"]}</a></div>'
+            )
+            # Try to insert after the matching H2 section
+            # Look for the heading in the rendered HTML
+            import re as _re
+            pattern = _re.compile(
+                rf'(<h2[^>]*>.*?{_re.escape(insert_heading[:30])}.*?</h2>)',
+                _re.IGNORECASE | _re.DOTALL,
+            )
+            match = pattern.search(html_content)
+            if match:
+                # Find the next H2 or end of content to insert before
+                next_h2 = _re.search(r'<h2', html_content[match.end():])
+                if next_h2:
+                    insert_pos = match.end() + next_h2.start()
+                    html_content = (
+                        html_content[:insert_pos]
+                        + cta_html_block
+                        + html_content[insert_pos:]
+                    )
+                else:
+                    html_content += cta_html_block
 
         template = Template("""<!DOCTYPE html>
 <html lang="en">

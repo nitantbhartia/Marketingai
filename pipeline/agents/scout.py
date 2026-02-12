@@ -252,6 +252,54 @@ class ScoutAgent(BaseAgent):
                 hints["gsc_insights"].append(lesson.lesson)
         return hints
 
+    def _analyze_competitor_gaps(self, keyword: str) -> str:
+        """Gap Analyst — use search grounding to find what top articles lack.
+
+        Queries Gemini Pro with search grounding enabled to discover what
+        existing top-ranking content misses: state-level nuances, insider
+        adjuster tips, specific dollar amounts, and actionable templates.
+
+        Returns a gap analysis string to embed in the content brief, or
+        empty string if the analysis fails or no LLM is available.
+        """
+        if not self.has_llm:
+            return ""
+
+        prompt = f"""You are an SEO gap analyst for insurance content.
+
+Search for the top-ranking articles about: "{keyword}"
+
+Analyze what the existing content LACKS. Insurance content typically misses:
+1. **State-specific nuances** — most articles are generic; identify which state laws or thresholds are missing
+2. **Insider adjuster tips** — what would a claims adjuster say that these articles don't cover?
+3. **Specific dollar amounts and ranges** — vague articles say "you could get more" but don't give numbers
+4. **Actionable templates** — exact phrases, scripts, or letter templates readers can use
+5. **Common mistakes** — what do most articles fail to warn readers about?
+
+Return a concise gap analysis (5-8 bullet points) of what a NEW article should include
+that existing content does NOT cover. Be specific — cite actual gaps, not generic advice.
+
+Format:
+GAPS:
+- [specific gap 1]
+- [specific gap 2]
+..."""
+
+        try:
+            # Uses strategy_model (Pro) which has search grounding enabled
+            result = self.call_claude(
+                prompt,
+                model=self.strategy_model,
+                max_tokens=600,
+            )
+            # Extract just the gaps section
+            if "GAPS:" in result:
+                return result[result.index("GAPS:"):]
+            return result.strip()
+        except Exception as e:
+            logger.warning(f"Gap analysis failed for '{keyword}': {e}")
+            return ""
+
     def _ai_generate_brief(self, keyword: str, category: str) -> str:
         """Use Claude to generate a detailed content brief."""
         # Include performance insights if available
@@ -263,19 +311,26 @@ class ScoutAgent(BaseAgent):
                 perf_section += f"- {insight}\n"
             perf_section += "Use these insights to shape the brief.\n"
 
+        # Run gap analysis to find what competitors miss
+        gap_analysis = self._analyze_competitor_gaps(keyword)
+        gap_section = ""
+        if gap_analysis:
+            gap_section = f"\n\nCompetitor Gap Analysis (cover these gaps that existing articles miss):\n{gap_analysis}\n"
+
         prompt = f"""Generate a content brief for an SEO article targeting the keyword: "{keyword}"
 
 Category: {category}
 
 The article is for ClaimCoach (claimcoach.app), an AI tool that helps car owners fight
 lowball insurance total loss settlement offers.
-{perf_section}
+{perf_section}{gap_section}
 Provide:
 1. Suggested angle/hook (2 sentences)
 2. Key points to cover (5-7 bullets)
 3. Target audience pain point
 4. Suggested internal topics to link to
 5. Authoritative external sources to reference
+6. Specific gaps to fill that competitors miss
 
 Keep it concise — this is a brief, not the article."""
 
