@@ -245,6 +245,7 @@ class SageAgent(BaseAgent):
             "seo_score": seo_raw,
             "readability_score": read_report["flesch_kincaid"],
             "word_count": wc,
+            "editor_claim": "",  # Always release Sage's claim after decision
         }
         if decision == "revision":
             existing_notes = article.revision_notes or ""
