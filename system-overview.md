@@ -36,37 +36,56 @@ BACKLOG  →  TODO  →  IN_PROGRESS  →  REVIEW  →  READY_TO_PUBLISH  →  D
 | Step | What happens | API Call |
 |------|-------------|---------|
 | Load seed topics | Hardcoded insurance keywords → create BACKLOG articles | None |
-| Discover related keywords | Reddit autocomplete API | HTTP GET (Reddit) |
-| Generate content brief | For up to 5 unbriefed topics | LLM: **strategy model** (Gemini Pro), ~500 tokens |
+| Discover related keywords | Google autocomplete API | HTTP GET (Google Suggest) |
+| **Gap Analysis** | Analyze what top-ranking competitor articles lack — state nuances, adjuster tips, dollar amounts, actionable templates | LLM: **strategy model** (Gemini Pro + search grounding), ~600 tokens |
+| Generate content brief | For up to 5 unbriefed topics, incorporating gap analysis results | LLM: **strategy model** (Gemini Pro), ~500 tokens |
 | Generate title | SEO-optimized title suggestion | LLM: **utility model** (Flash-Lite), ~60 tokens |
 | Promote | BACKLOG → TODO if brief is substantial | None (DB update) |
 
 **Claim field**: None (no concurrency needed)
 
+**Gap Analyst**: Uses Gemini Pro with search grounding enabled to discover what existing top-ranking content misses. The gap analysis is injected directly into the content brief so Quill writes articles that fill competitive voids rather than repeating what's already out there.
+
 ---
 
 ### 2. Quill (runs every hour)
 
-**Job**: Write articles using a 3-phase pipeline. Picks TODO or REVISION articles.
+**Job**: Write articles using a 5-phase pipeline. Picks TODO or REVISION articles.
 
 **Claim field**: `writer_claim` (atomic lock via `try_claim`)
+
+**Golden System Prompt**: Role-Based Constraint Prompting that casts the LLM as "Lead Content Strategist and Senior Insurance Adjuster." Enforces:
+- **Banned AI-isms**: 27 words/phrases never used (delve, tapestry, leverage, utilize, comprehensive, etc.)
+- **Sentence rhythm**: If a sentence is >20 words, the next must be <10
+- **Adjuster Insider callouts**: Every section includes a `> **Adjuster Insider:**` blockquote
+- **"Why this matters to your wallet"**: Every technical fact must have a dollar-impact sentence
+- **Active voice only**: "The adjuster denied the claim" not "The claim was denied"
+- **Entity-first SEO**: Primary entities woven into first 100 words
 
 | Phase | What happens | API Call |
 |-------|-------------|---------|
 | **Claim** | Atomically set `writer_claim`, status → IN_PROGRESS | None (DB) |
-| **Phase 1: Outline** | Generate structured outline (H2s, key points, data) | LLM: **strategy model** (Gemini Pro), ~1500 tokens |
-| **Phase 2: Draft** | Write 6-7 sections from outline | LLM: **fast model** (Gemini Flash) x6-7 calls, ~1500 tokens each |
+| **Phase 0: Entity Mapping** | Extract insurance/legal entities for E-E-A-T (legal terms, insurance concepts, processes, data points, authoritative sources) | LLM: **fast model** (Gemini Flash), ~500 tokens |
+| **Phase 1: Outline** | Generate structured outline incorporating entity map (H2s, key points, data, entities per section) | LLM: **strategy model** (Gemini Pro), ~1500 tokens |
+| **Phase 2: Draft** | Write 6-7 sections from outline. Each section gets: friction point injection, Adjuster Insider callout instruction, "why this matters to your wallet" requirement. **Temperature: 0.85** for human-feel creative writing. | LLM: **fast model** (Gemini Flash) x6-7 calls, ~1500 tokens each |
+| **Phase 2.5: Contrastive Critique** | Flash-Lite "cynical insurance adjuster" identifies 3 problems (most generic passage, most robotic sentence, vaguest claim). Flash then rewrites only those flagged passages. | LLM: **utility model** (Flash-Lite) ~600 tokens + **fast model** (Flash) ~8000 tokens |
 | **Phase 3: Self-review** | Deterministic checks + auto-fix | - |
 | - Keyword in first 100 words? | Insert if missing (fuzzy `_keyword_match`) | None |
 | - ClaimCoach CTA present? | Add if missing | None |
 | - FAQ section present? | Generate if missing | LLM: **utility model** (Flash-Lite), ~800 tokens |
 | - Meta description? | Generate if missing | LLM: **utility model** (Flash-Lite), ~80 tokens |
+| - **AI-isms filter** | Deterministic find-and-replace: 20 word replacements (utilize→use, leverage→use, comprehensive→full, etc.) + strip 27 banned multi-word phrases | None (regex) |
 | **Quality gate** | Word count >= 1500? FK >= 40? | None (deterministic) |
 | **Submit** | status → REVIEW, release `writer_claim=""` | None (DB) |
 
 **If revision** (article came back from Sage): Attempts targeted fixes first using the `default model`, falls through to full rewrite if issues are too broad.
 
-**Tokens per article**: ~10,000-12,000 (first draft), +3,000 per revision round.
+**Friction Point Injection**: Each middle section receives a unique "insider knowledge" friction point extracted from the content brief or generated per-category. Examples:
+- `problem_aware`: "Adjusters often use automated valuation tools that systematically undervalue vehicles by 10-20%"
+- `solution_aware`: "Adjusters have internal authority to increase offers by 10-15% without supervisor approval"
+- `state_specific`: "Filing a DOI complaint triggers an automatic review — adjusters often settle quickly once they see the complaint number"
+
+**Tokens per article**: ~14,000-16,000 (first draft with entity mapping + critique loop), +3,000 per revision round.
 
 ---
 
@@ -115,11 +134,14 @@ After every decision: `editor_claim=""` (always released), `revision_notes` appe
 | Generate slug | From title, max 80 chars | None |
 | Save markdown | `blog/posts/{slug}.md` with YAML frontmatter | None (filesystem) |
 | Generate CTA variants | Primary (sidebar), secondary (inline), newsletter (bottom) | None (template-based) |
-| Generate HTML | `python-markdown` → Jinja2 template → `blog/html/{slug}.html` | None (library) |
+| **Context-aware CTA** | Flash-Lite identifies the "high-intent moment" (peak frustration paragraph) and generates a CTA matching that emotion, inserted at the correct H2 boundary | LLM: **utility model** (Flash-Lite), ~300 tokens |
+| Generate HTML | `python-markdown` → Jinja2 template → `blog/html/{slug}.html` with context-aware CTA injected at matching H2 position | None (library) |
 | Update blog index | Append to `blog/index.json` | None (filesystem) |
 | Update article | `published_url`, `published_at`, status → DONE | None (DB) |
 
-**LLM calls**: 0 (purely deterministic publishing)
+**Context-Aware CTA**: Instead of purely template-based CTAs, Ezra now uses Flash-Lite to read the article and identify where the reader feels most frustrated with their insurance company. It generates a CTA that mirrors that specific emotion and inserts it at exactly the right H2 boundary in the HTML output. Template CTAs (primary, secondary, newsletter) remain as fallbacks. Only `claimcoach.app` URLs are allowed in generated CTAs (hardcoded allowlist).
+
+**LLM calls**: 1 per article (~300 tokens for context-aware CTA)
 
 ---
 
@@ -197,15 +219,181 @@ Sage records lessons for Quill after every review (e.g., "Keyword not in meta de
 
 ---
 
+## Golden System Prompt (Quill's Writing Voice)
+
+Quill uses **Role-Based Constraint Prompting** — the LLM is cast as "Lead Content Strategist and Senior Insurance Adjuster for ClaimCoach." This suppresses AI-isms and forces a "High-Agency, Low-Fluff" tone.
+
+### The "Human" Filter Rules
+
+| Rule | What it does |
+|------|-------------|
+| **No AI-isms** | 27 banned words/phrases: delve, tapestry, pivotal, unlock, landscape, comprehensive, utilize, leverage, embark, foster, streamline, robust, cutting-edge, paradigm, synergy, game-changer, deep dive, "at the end of the day", "it's important to note", "in today's world", etc. |
+| **Sentence rhythm** | If a sentence is >20 words, the next must be <10. Creates natural cadence. |
+| **Empathetic coaching** | Use "you" and "we." Acknowledge stress. Don't lecture; coach. |
+| **Jargon handling** | Use technical terms but explain them instantly in plain English |
+| **No wrapped summaries** | Never "In conclusion" or "To summarize." End with actionable Next Step. |
+| **Active voice only** | "The adjuster denied the claim" not "The claim was denied by the adjuster" |
+| **Short words** | "Get" not "obtain." "Show" not "demonstrate." "Use" not "utilize." |
+
+### Adjuster Insider Callouts
+
+Every section must include a Markdown blockquote callout:
+
+```markdown
+> **Adjuster Insider:** Most adjusters have authority to increase offers by 10-15%
+> without supervisor approval. They just won't tell you that.
+```
+
+### "Why This Matters to Your Wallet"
+
+For every technical fact, the writer must add one sentence explaining the dollar impact. Don't just say what something is — say what it costs the reader.
+
+### Deterministic AI-Isms Filter (Phase 3)
+
+After all LLM writing is done, a zero-cost regex pass runs:
+
+**Word replacements** (20 rules):
+```
+utilize → use, leverage → use, comprehensive → full, robust → strong,
+streamline → simplify, facilitate → help, implement → set up,
+subsequently → then, furthermore → also, additionally → also,
+demonstrate → show, obtain → get, commence → start, endeavor → try,
+ascertain → find out, in order to → to, due to the fact that → because,
+at this point in time → now, prior to → before
+```
+
+**Phrase stripping** (27 phrases): Multi-word AI-isms with no simple replacement are removed entirely, preserving surrounding sentence structure.
+
+---
+
+## Temperature Control
+
+LLM calls now support a `temperature` parameter:
+
+| Task Type | Temperature | Rationale |
+|-----------|-------------|-----------|
+| **SEO writing** (section drafting, monolithic draft, critique refinement) | **0.85** | Higher creativity for human-feel sentence structures while the Golden System Prompt keeps it grounded in insurance facts |
+| **Structured/analytical** (outlines, entity extraction, fact checks, scoring) | Provider default | Lower temperature for consistency and accuracy |
+
+---
+
+## Rate Limiting & Budget Tracking
+
+### RPM Limiter (Request-Per-Minute)
+- **Gemini**: Minimum 12-second delay between calls (free tier: 5 RPM)
+- Thread-safe global lock shared across all agents
+
+### TPM Limiter (Token-Per-Minute)
+- **Sliding window**: 60-second window tracking estimated tokens (prompt + response)
+- **Threshold**: Parks pipeline for 30s when approaching 85% of 250k TPM limit
+- **Token estimation**: ~4 chars per token for English text
+- **Prevents**: Hard 429 errors during sustained multi-article runs
+
+### Daily Budget Gates
+- **Pro**: 20 calls/day → auto-downgrades to Flash when exhausted
+- **Flash**: 250 calls/day
+- **Flash-Lite**: 1000 calls/day
+
+---
+
 ## LLM Provider & Model Tiers
 
 You're using **Gemini** on Railway with `LLM_PROVIDER=gemini`:
 
 | Tier | Model | Used by | Purpose |
 |------|-------|---------|---------|
-| **Strategy** | gemini-2.5-pro | Scout (briefs), Quill (outlines), Sage (fact check) | High-trust decisions |
+| **Strategy** | gemini-2.5-pro | Scout (briefs + gap analysis), Quill (outlines), Sage (fact check) | High-trust decisions, search grounding enabled |
 | **Default** | gemini-2.5-flash | Quill (revisions), Lurker (response drafts) | Primary work |
-| **Fast** | gemini-2.5-flash | Quill (section drafting) | Bulk content |
-| **Utility** | gemini-2.5-flash-lite | Scout (titles), Quill (FAQ/meta), Sage (originality), Herald (social) | Lightweight tasks |
+| **Fast** | gemini-2.5-flash | Quill (entity mapping, section drafting at temp 0.85, critique refinement) | Bulk content |
+| **Utility** | gemini-2.5-flash-lite | Scout (titles), Quill (FAQ/meta, contrastive critique), Sage (originality), Herald (social), Ezra (context-aware CTA) | Lightweight tasks |
 
-**Rate limiting**: 12s between Gemini calls (5 RPM). Budget gates: Pro 20/day, Flash 250/day, Flash-Lite 1000/day. Pro auto-downgrades to Flash when budget exhausted.
+---
+
+## Quill's Full Writing Pipeline (Detailed Flow)
+
+```
+Article claimed (TODO/REVISION → IN_PROGRESS)
+    │
+    ▼
+Phase 0: Entity Mapping (Flash, ~500 tokens)
+    │  Extract: Legal Terms, Insurance Concepts, Processes, Data Points, Sources
+    │
+    ▼
+Phase 1: Outline Generation (Pro, ~1500 tokens)
+    │  Entity map injected into outline prompt
+    │  5-7 H2 sections with entities assigned per section
+    │
+    ▼
+Phase 2: Section-by-Section Drafting (Flash x6-7, ~1500 tokens each, temp=0.85)
+    │  Each section gets:
+    │    - Full outline context
+    │    - Product context + state rules
+    │    - Friction point injection (middle sections)
+    │    - "Include Adjuster Insider blockquote" instruction
+    │    - "Why this matters to your wallet" instruction
+    │    - Previous section tail (500 chars) for continuity
+    │
+    ▼
+Phase 2.5: Contrastive Critique Loop
+    │  Step 1: Flash-Lite "cynical adjuster" identifies 3 problems (~600 tokens)
+    │    - Most GENERIC passage (quoted)
+    │    - Most ROBOTIC sentence (quoted)
+    │    - Most VAGUE claim (quoted)
+    │  Step 2: Flash rewrites ONLY the 3 flagged passages (~8000 tokens)
+    │    - Validates refined article isn't >30% shorter
+    │
+    ▼
+Phase 3: Self-Review & Auto-Fix (deterministic, 0 LLM tokens)
+    │  Check 1: Keyword in first 100 words → insert if missing
+    │  Check 2: ClaimCoach CTA present → add if missing
+    │  Check 3: FAQ section present → generate if missing (Flash-Lite)
+    │  Check 4: Meta description → generate/trim/extend if needed (Flash-Lite)
+    │  Check 5: Keyword in meta description → prepend if missing
+    │  Check 6: AI-isms filter → regex replace 20 words + strip 27 phrases
+    │
+    ▼
+Quality Gate: word count >= 1500, FK >= 40
+    │
+    ▼
+Submit to Sage (IN_PROGRESS → REVIEW, writer_claim released)
+```
+
+---
+
+## Ezra's CTA Strategy (4 Variants)
+
+| Position | Type | How it works |
+|----------|------|-------------|
+| **Sidebar** | Primary (template) | State-specific: "Get Your Free {State} Settlement Analysis" or generic fallback |
+| **Inline** | Secondary (template) | Keyword-aware: "Not Sure If Your Offer Is Fair?" (settlement), "Declared a Total Loss?" (total loss), generic fallback |
+| **Bottom** | Newsletter (template) | "Insurance Tips in Your Inbox" → subscribe CTA |
+| **Contextual** | Context-aware (LLM) | Flash-Lite identifies the "high-intent moment" — the paragraph where the reader is most frustrated — and generates a CTA that mirrors that emotion. Inserted at the matching H2 boundary in the HTML. Only `claimcoach.app` URLs allowed. |
+
+---
+
+## Scout's Research Pipeline (Detailed Flow)
+
+```
+Phase 1: Seed Topics
+    │  63 predefined keywords + 120 state variations + 30 vehicle variations
+    │
+    ▼
+Phase 2: Keyword Discovery
+    │  Google Autocomplete API with modifiers ("how to", "what is", "best way to", etc.)
+    │
+    ▼
+Phase 3: AI Brief Generation (up to 5 per run)
+    │  For each unbriefed topic:
+    │    Step 1: Gap Analysis (Pro + search grounding, ~600 tokens)
+    │      - What top-ranking articles lack
+    │      - State-specific nuances missing
+    │      - Dollar amounts and templates missing
+    │    Step 2: Content Brief (Pro, ~500 tokens)
+    │      - Gap analysis injected into brief prompt
+    │      - Performance insights from GSC data
+    │    Step 3: Title Suggestion (Flash-Lite, ~60 tokens)
+    │
+    ▼
+Phase 4: Promote to TODO
+    │  Articles with substantive AI-generated briefs promoted from BACKLOG → TODO
+```
