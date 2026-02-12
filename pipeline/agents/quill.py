@@ -86,7 +86,7 @@ class QuillAgent(BaseAgent):
         if article is None:
             return {"status": "error", "reason": "article_not_found"}
 
-        logger.info(f"Writing article: {article.keyword} (revision={is_revision})")
+        logger.info(f"Writing article: {article.target_keyword} (revision={is_revision})")
 
         # Load context documents
         product_context = self.config.load_product_context()
@@ -116,7 +116,7 @@ class QuillAgent(BaseAgent):
 
         # Parse the result
         content, meta_description = self._parse_result(result)
-        title = article.suggested_title or article.title or article.keyword.title()
+        title = article.suggested_title or article.title or article.target_keyword.title()
         slug = generate_slug(title)
         wc = word_count(content)
 
@@ -124,7 +124,7 @@ class QuillAgent(BaseAgent):
         self.db.update_article(
             article_id,
             title=title,
-            content=content,
+            markdown_content=content,
             meta_description=meta_description,
             slug=slug,
             word_count=wc,
@@ -133,7 +133,7 @@ class QuillAgent(BaseAgent):
 
         self.db.record_metric("quill_write", wc, json.dumps({
             "article_id": article_id,
-            "keyword": article.keyword,
+            "keyword": article.target_keyword,
             "is_revision": is_revision,
             "word_count": wc,
         }))
@@ -190,13 +190,13 @@ class QuillAgent(BaseAgent):
         if is_revision:
             parts.append(f"=== REVISION TASK ===")
             parts.append(f"Revise the following article based on reviewer feedback.")
-            parts.append(f"Keyword: {article.keyword}")
+            parts.append(f"Keyword: {article.target_keyword}")
             parts.append(f"Revision notes:\n{article.revision_notes}")
-            parts.append(f"\nOriginal article:\n{article.content}")
+            parts.append(f"\nOriginal article:\n{article.markdown_content}")
         else:
             parts.append(f"=== WRITING TASK ===")
             parts.append(f"Write a new article.")
-            parts.append(f"Target keyword: {article.keyword}")
+            parts.append(f"Target keyword: {article.target_keyword}")
             if article.content_brief:
                 parts.append(f"Content brief:\n{article.content_brief}")
             if article.target_state:
@@ -221,7 +221,7 @@ class QuillAgent(BaseAgent):
         lines = ["Available articles for internal linking:"]
         for a in published[:20]:  # Cap at 20
             url = a.published_url or f"https://claimcoach.app/blog/{a.slug}"
-            lines.append(f"- [{a.title}]({url}) — keyword: {a.keyword}")
+            lines.append(f"- [{a.title}]({url}) — keyword: {a.target_keyword}")
         return "\n".join(lines)
 
     def _parse_result(self, result: str) -> tuple[str, str]:

@@ -96,8 +96,8 @@ genuinely helpful, never spammy. We're sharing a useful resource, not selling.
 
 Article Title: {article.title}
 Article URL: {article.published_url}
-Keyword: {article.keyword}
-Summary (first 500 chars): {article.content[:500]}
+Keyword: {article.target_keyword}
+Summary (first 500 chars): {article.markdown_content[:500]}
 
 Generate posts for:
 
@@ -178,7 +178,7 @@ FACEBOOK:
         """Generate template-based social content (no AI needed)."""
         url = article.published_url or f"https://claimcoach.app/blog/{article.slug}"
         title = article.title
-        keyword = article.keyword
+        keyword = article.target_keyword
 
         return {
             "reddit": (

@@ -65,6 +65,7 @@ class PipelineSettings:
     min_backlog_topics: int = 15
     articles_per_week_target: int = 4
     max_revision_rounds: int = 3
+    dashboard_url: str = ""
 
 
 @dataclass

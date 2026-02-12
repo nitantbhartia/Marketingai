@@ -116,7 +116,7 @@ class MorganAgent(BaseAgent):
         if published_this_week:
             lines.append("### Published Articles")
             for a in published_this_week:
-                lines.append(f"- [{a.title}]({a.published_url}) — keyword: {a.keyword}")
+                lines.append(f"- [{a.title}]({a.published_url}) — keyword: {a.target_keyword}")
             lines.append("")
 
         if stuck:

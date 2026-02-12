@@ -41,14 +41,14 @@ class BaseAgent(ABC):
         rand = uuid.uuid4().hex[:6]
         return f"{self.name}-{ts}-{rand}"
 
-    def try_claim_article(self, article_id: str, new_status: str) -> bool:
+    def try_claim_article(self, article_id: int, new_status: str) -> bool:
         """Attempt to claim an article using this agent's claim field."""
         if self.claim_field is None:
             raise ValueError(f"Agent {self.name} has no claim_field defined")
         claim_id = self.generate_claim_id()
         return self.db.try_claim(article_id, self.claim_field, claim_id, new_status)
 
-    def pick_and_claim(self, from_status: str, to_status: str) -> str | None:
+    def pick_and_claim(self, from_status: str, to_status: str) -> int | None:
         """Pick a random unclaimed article from a status and claim it.
 
         Returns article ID if successful, None otherwise.

@@ -268,7 +268,7 @@ Draft the response:"""
 
         scored = []
         for article in published:
-            keyword = article.keyword.lower() if article.keyword else ""
+            keyword = article.target_keyword.lower() if article.target_keyword else ""
             title = article.title.lower() if article.title else ""
 
             relevance = 0
