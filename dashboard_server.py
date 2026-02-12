@@ -380,6 +380,41 @@ async def trigger_scout():
         }
 
 
+@app.get("/trigger/promote")
+async def trigger_promote():
+    """Promote top backlog topics to 'todo' so Quill can pick them up."""
+    try:
+        from pipeline.config import Config
+        from pipeline.db import Database, ArticleStatus
+
+        cfg = Config.load()
+        db = Database(cfg.resolve_path(cfg.pipeline.database_path))
+
+        backlog = db.query_articles(
+            status=ArticleStatus.BACKLOG.value,
+            limit=10,
+            order_by="commercial_intent DESC, keyword_difficulty ASC",
+        )
+
+        promoted = []
+        for article in backlog:
+            db.update_article(article.id, status=ArticleStatus.TODO.value)
+            promoted.append({"id": article.id, "keyword": article.target_keyword})
+
+        return {
+            "status": "success",
+            "promoted": len(promoted),
+            "articles": promoted,
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        }
+
+
 @app.get("/trigger/quill")
 async def trigger_quill():
     """Manually trigger Quill agent to write articles."""
