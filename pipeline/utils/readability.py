@@ -6,6 +6,29 @@ import re
 import math
 
 
+def _strip_markdown(text: str) -> str:
+    """Remove markdown formatting so readability scores reflect prose only.
+
+    Strips headers, link syntax, image syntax, bold/italic/code markers,
+    and list markers. Keeps the actual words.
+    """
+    # Remove full header lines (# Header -> "")
+    clean = re.sub(r"^#{1,6}\s+.*$", "", text, flags=re.MULTILINE)
+    # Remove link syntax but keep link text
+    clean = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", clean)
+    # Remove images
+    clean = re.sub(r"!\[([^\]]*)\]\([^)]+\)", "", clean)
+    # Remove bold/italic/code markers
+    clean = re.sub(r"[*_~`]", "", clean)
+    # Remove list markers (- or * at start of line)
+    clean = re.sub(r"^\s*[-*+]\s+", "", clean, flags=re.MULTILINE)
+    # Remove numbered list markers
+    clean = re.sub(r"^\s*\d+\.\s+", "", clean, flags=re.MULTILINE)
+    # Collapse multiple blank lines
+    clean = re.sub(r"\n{3,}", "\n\n", clean)
+    return clean.strip()
+
+
 def count_syllables(word: str) -> int:
     """Estimate syllable count for an English word."""
     word = word.lower().strip()
@@ -27,7 +50,9 @@ def flesch_kincaid_score(text: str) -> float:
     """Calculate Flesch-Kincaid Reading Ease score.
 
     Higher = easier to read. Target: 60+ (8th grade level).
+    Strips markdown formatting so headers don't skew the score.
     """
+    text = _strip_markdown(text)
     sentences = re.split(r"[.!?]+", text)
     sentences = [s.strip() for s in sentences if s.strip()]
     if not sentences:
@@ -54,6 +79,7 @@ def flesch_kincaid_score(text: str) -> float:
 
 def avg_sentence_length(text: str) -> float:
     """Calculate average sentence length in words."""
+    text = _strip_markdown(text)
     sentences = re.split(r"[.!?]+", text)
     sentences = [s.strip() for s in sentences if s.strip()]
     if not sentences:
@@ -65,8 +91,9 @@ def avg_sentence_length(text: str) -> float:
 
 def avg_paragraph_length(text: str) -> float:
     """Calculate average paragraph length in sentences."""
+    text = _strip_markdown(text)
     paragraphs = re.split(r"\n\n+", text)
-    paragraphs = [p.strip() for p in paragraphs if p.strip() and not p.startswith("#")]
+    paragraphs = [p.strip() for p in paragraphs if p.strip()]
     if not paragraphs:
         return 0.0
 
