@@ -30,7 +30,9 @@ class AnthropicConfig:
 @dataclass
 class GeminiConfig:
     api_key: str = ""
-    default_model: str = "gemini-2.0-flash"
+    default_model: str = "gemini-2.5-flash"
+    # Minimum seconds between API calls (free tier = 5 RPM → 12s)
+    rate_limit_delay: float = 12.0
 
 
 @dataclass

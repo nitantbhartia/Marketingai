@@ -93,10 +93,12 @@ class ScoutAgent(BaseAgent):
                 existing_keywords.add(kw.lower())
                 discovered += 1
 
-        # Phase 3: If Claude API is available, generate briefs for top topics
+        # Phase 3: If LLM is available, generate briefs for top unbriefed topics.
+        # Capped at 3 to stay within Gemini free-tier rate limits (each article = 2 calls).
         unbriefed = self.db.query_articles(status=ArticleStatus.BACKLOG.value, limit=10)
+        max_ai_briefs = 3
         briefed = 0
-        if self.config.anthropic.api_key:
+        if self.config.anthropic.api_key or self.config.gemini.api_key:
             for article in unbriefed:
                 # Skip if already has a detailed AI-generated brief
                 # (AI briefs are longer and don't start with generic phrases)
@@ -111,6 +113,8 @@ class ScoutAgent(BaseAgent):
                         title=title,
                     )
                     briefed += 1
+                    if briefed >= max_ai_briefs:
+                        break
                 except Exception as e:
                     logger.warning(f"Failed to generate AI brief: {e}")
 

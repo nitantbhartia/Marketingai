@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -11,6 +12,10 @@ from typing import Any
 
 from pipeline.config import Config
 from pipeline.db import Database
+
+# Module-level rate limiter shared across all agents in the same process.
+_gemini_lock = threading.Lock()
+_gemini_last_call: float = 0.0
 
 
 class BaseAgent(ABC):
@@ -118,6 +123,7 @@ class BaseAgent(ABC):
     def _call_gemini(
         self, prompt: str, system: str, model: str | None, max_tokens: int
     ) -> str:
+        global _gemini_last_call
         import json
         import urllib.error
         import urllib.request
@@ -125,6 +131,16 @@ class BaseAgent(ABC):
         api_key = self.config.gemini.api_key
         if not api_key:
             raise ValueError("Gemini API key not configured")
+
+        # ── Rate limiter: enforce minimum delay between Gemini calls ──
+        min_delay = getattr(self.config.gemini, "rate_limit_delay", 12.0)
+        with _gemini_lock:
+            elapsed = time.time() - _gemini_last_call
+            if elapsed < min_delay:
+                wait_for = min_delay - elapsed
+                self.logger.info(f"Rate limit: waiting {wait_for:.1f}s before Gemini call")
+                time.sleep(wait_for)
+            _gemini_last_call = time.time()
 
         # Ignore Anthropic model names passed from callers; use Gemini config
         is_anthropic_model = model and ("claude" in model or "anthropic" in model)
