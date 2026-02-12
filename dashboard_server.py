@@ -709,6 +709,28 @@ async def fix_stuck_articles():
     return {"status": "success", "reset_to_todo": fixed}
 
 
+@app.get("/debug/fix-stuck-reviews")
+async def fix_stuck_reviews():
+    """Clear stale editor_claim on articles stuck in review.
+
+    When Sage crashes mid-review, the editor_claim stays locked and
+    prevents future Sage runs from processing the article.  This
+    endpoint releases those stale claims so the next Sage run can
+    pick them up.
+    """
+    from content_quality.db import get_db
+    with get_db() as db:
+        cursor = db.execute("""
+            UPDATE articles
+            SET editor_claim = ''
+            WHERE status = 'review'
+              AND editor_claim != ''
+              AND editor_claim IS NOT NULL
+        """)
+        fixed = cursor.rowcount
+    return {"status": "success", "stale_review_claims_cleared": fixed}
+
+
 @app.get("/debug/database")
 async def debug_database():
     """Debug endpoint to see what's in the database."""
