@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-from collections import Counter
+from collections import defaultdict
 from typing import Any
 
 from pipeline.agents.base import BaseAgent
@@ -237,70 +236,51 @@ class QuillAgent(BaseAgent):
         return "\n".join(lines)
 
     def _extract_lessons(self) -> str:
-        """Extract recurring issues from recent Sage reviews to avoid repeating mistakes.
+        """Load lessons from the feedback_lessons DB table.
 
-        Parses revision_notes from recently reviewed articles, counts recurring
-        issues, and returns a formatted section for the writing prompt.
+        Lessons are produced by Sage (review failures, success patterns)
+        and Morgan (GSC performance data). This replaces the old approach
+        of re-parsing revision_notes on every run.
         """
-        reviewed = self.db.get_reviewed_articles(limit=30)
-        if not reviewed:
+        lessons = self.get_lessons_for_me()
+        if not lessons:
             return ""
 
-        # Parse "Issues to Fix" and per-category issues from revision notes
-        issue_counter: Counter = Counter()
-        category_lost: Counter = Counter()  # points lost per category
-
-        for article in reviewed:
-            notes = article.revision_notes
-            if not notes:
-                continue
-
-            # Extract individual issues from "### Issues to Fix:" sections
-            for block in notes.split("### Issues to Fix:"):
-                if block == notes.split("### Issues to Fix:")[0]:
-                    continue  # skip content before first "Issues to Fix"
-                for line in block.split("\n"):
-                    line = line.strip()
-                    if line.startswith("- ") and not line.startswith("- **"):
-                        issue_text = line[2:].strip()
-                        if issue_text:
-                            issue_counter[issue_text] += 1
-
-            # Extract category scores to find weak areas
-            for match in re.finditer(
-                r"\*\*(\w+)\*\*:\s*([\d.]+)/([\d.]+)", notes
-            ):
-                category = match.group(1)
-                score = float(match.group(2))
-                max_score = float(match.group(3))
-                lost = max_score - score
-                if lost > 0:
-                    category_lost[category] += lost
-
-        if not issue_counter and not category_lost:
-            return ""
+        # Group lessons by category
+        by_category: dict[str, list] = defaultdict(list)
+        for lesson in lessons:
+            by_category[lesson.category].append(lesson)
 
         lines = []
 
-        # Top weak categories
-        if category_lost:
-            worst = category_lost.most_common(3)
-            lines.append("Weakest areas across recent articles (fix these first):")
-            for category, total_lost in worst:
-                lines.append(f"  - {category}: lost {total_lost:.0f} points total")
+        # Failure lessons grouped by rubric category
+        rubric_cats = ["seo", "readability", "factual_accuracy", "cta",
+                       "legal_compliance", "word_count", "internal_links", "plagiarism"]
+        for cat in rubric_cats:
+            cat_lessons = by_category.get(cat, [])
+            if not cat_lessons:
+                continue
+            lines.append(f"  {cat.upper()} — common issues:")
+            for lesson in sorted(cat_lessons, key=lambda x: -x.occurrences)[:3]:
+                lines.append(f"    - ({lesson.occurrences}x) {lesson.lesson}")
 
-        # Top recurring issues
-        recurring = [(issue, count) for issue, count in issue_counter.most_common(10) if count >= 2]
-        if recurring:
+        # Performance lessons from Morgan (GSC data)
+        perf = by_category.get("performance", [])
+        if perf:
             lines.append("")
-            lines.append("Most common mistakes (seen in multiple articles):")
-            for issue, count in recurring:
-                lines.append(f"  - ({count}x) {issue}")
+            lines.append("  PERFORMANCE DATA (from real search traffic):")
+            for lesson in perf[:3]:
+                lines.append(f"    - {lesson.lesson}")
 
-        if not lines:
-            return ""
+        # Success patterns — what first-draft approvals look like
+        successes = by_category.get("success_pattern", [])
+        if successes:
+            lines.append("")
+            lines.append("  PATTERNS FROM FIRST-DRAFT APPROVALS:")
+            for lesson in successes[:3]:
+                lines.append(f"    - ({lesson.occurrences}x) {lesson.lesson}")
 
-        return "\n".join(lines)
+        return "\n".join(lines) if lines else ""
 
     def _parse_result(self, result: str) -> tuple[str, str]:
         """Parse Claude's output into content and meta description."""

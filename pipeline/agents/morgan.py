@@ -31,6 +31,14 @@ class MorganAgent(BaseAgent):
         checks["social_amplification"] = self._check_social_amplification()
         checks["quality_trends"] = self._check_quality_trends()
 
+        # Distill cross-agent lessons from performance data
+        checks["learning"] = self._distill_performance_lessons()
+
+        # Decay old lessons so stale patterns fade
+        decayed = self.db.decay_lessons(older_than_days=30)
+        if decayed:
+            logger.info(f"Decayed {decayed} stale lessons")
+
         # Overall health
         alerts = []
         spawn_actions = []
@@ -280,4 +288,100 @@ class MorganAgent(BaseAgent):
         else:
             result["status"] = "no_data"
 
+        return result
+
+    def _distill_performance_lessons(self) -> dict:
+        """Analyze published articles with GSC data and produce lessons for other agents.
+
+        Runs every health check cycle. Looks at real search traffic to find
+        what actually works, then stores structured lessons that Quill and
+        Scout read on their next run.
+        """
+        published = self.db.query_articles(
+            status=ArticleStatus.DONE.value, limit=200
+        )
+        articles_with_gsc = [a for a in published if a.last_gsc_clicks > 0]
+
+        result: dict[str, Any] = {
+            "published_count": len(published),
+            "with_gsc_data": len(articles_with_gsc),
+            "lessons_produced": 0,
+        }
+
+        if len(articles_with_gsc) < 5:
+            result["status"] = "insufficient_data"
+            return result
+
+        # ── Word count vs. clicks: what length performs best? ──
+        sorted_by_clicks = sorted(articles_with_gsc, key=lambda a: -a.last_gsc_clicks)
+        top_quarter = sorted_by_clicks[:max(1, len(sorted_by_clicks) // 4)]
+        avg_wc = sum(a.word_count for a in top_quarter) / len(top_quarter)
+        self.record_lesson(
+            "quill", "performance",
+            f"Top-performing articles average {int(avg_wc)} words",
+        )
+        result["lessons_produced"] += 1
+
+        # ── Category vs. clicks: which categories get organic traffic? ──
+        cat_clicks: dict[str, list[int]] = {}
+        for a in articles_with_gsc:
+            cat = a.content_category or "general"
+            cat_clicks.setdefault(cat, []).append(a.last_gsc_clicks)
+
+        if cat_clicks:
+            best_cat = max(
+                cat_clicks,
+                key=lambda c: sum(cat_clicks[c]) / len(cat_clicks[c]),
+            )
+            avg_clicks = sum(cat_clicks[best_cat]) / len(cat_clicks[best_cat])
+            self.record_lesson(
+                "scout", "gsc_best_category",
+                f"'{best_cat}' gets most organic clicks (avg {avg_clicks:.0f}/article)",
+            )
+            result["lessons_produced"] += 1
+
+        # ── State coverage: which states' content performs best? ──
+        state_clicks: dict[str, list[int]] = {}
+        for a in articles_with_gsc:
+            if a.target_state:
+                state_clicks.setdefault(a.target_state, []).append(a.last_gsc_clicks)
+
+        if state_clicks:
+            best_state = max(
+                state_clicks,
+                key=lambda s: sum(state_clicks[s]) / len(state_clicks[s]),
+            )
+            self.record_lesson(
+                "scout", "gsc_best_state",
+                f"'{best_state}' content gets most search traffic",
+            )
+            result["lessons_produced"] += 1
+
+        # ── SEO score correlation: does Sage's score predict real traffic? ──
+        high_seo = [a for a in articles_with_gsc if a.seo_score >= 18]
+        low_seo = [a for a in articles_with_gsc if a.seo_score < 14]
+        if high_seo and low_seo:
+            avg_high = sum(a.last_gsc_clicks for a in high_seo) / len(high_seo)
+            avg_low = sum(a.last_gsc_clicks for a in low_seo) / len(low_seo)
+            if avg_high > avg_low * 1.5:
+                self.record_lesson(
+                    "quill", "performance",
+                    f"High SEO scores correlate with {avg_high/max(avg_low, 1):.1f}x more clicks",
+                )
+                result["lessons_produced"] += 1
+
+        # ── Readability correlation ──
+        high_read = [a for a in articles_with_gsc if a.readability_score >= 60]
+        low_read = [a for a in articles_with_gsc if a.readability_score < 50]
+        if high_read and low_read:
+            avg_hr = sum(a.last_gsc_clicks for a in high_read) / len(high_read)
+            avg_lr = sum(a.last_gsc_clicks for a in low_read) / len(low_read)
+            if avg_hr > avg_lr * 1.3:
+                self.record_lesson(
+                    "quill", "performance",
+                    f"Readable articles (FK 60+) get {avg_hr/max(avg_lr, 1):.1f}x more clicks",
+                )
+                result["lessons_produced"] += 1
+
+        result["status"] = "ok"
         return result

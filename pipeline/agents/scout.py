@@ -93,9 +93,19 @@ class ScoutAgent(BaseAgent):
                 existing_keywords.add(kw.lower())
                 discovered += 1
 
+        # Load lessons about which categories perform well
+        performance_hints = self._load_performance_hints()
+
         # Phase 3: If LLM is available, generate briefs for top unbriefed topics.
         # Capped at 3 to stay within Gemini free-tier rate limits (each article = 2 calls).
         unbriefed = self.db.query_articles(status=ArticleStatus.BACKLOG.value, limit=10)
+        if performance_hints:
+            # Prioritize articles in high-performing categories
+            unbriefed = sorted(
+                unbriefed,
+                key=lambda a: a.content_category in performance_hints.get("preferred", []),
+                reverse=True,
+            )
         max_ai_briefs = 3
         briefed = 0
         if self.config.anthropic.api_key or self.config.gemini.api_key:
@@ -207,15 +217,40 @@ class ScoutAgent(BaseAgent):
         kw_lower = keyword.lower()
         return any(term in kw_lower for term in relevant_terms)
 
+    def _load_performance_hints(self) -> dict:
+        """Load lessons from Sage/Morgan about which categories and topics perform well."""
+        lessons = self.get_lessons_for_me()
+        if not lessons:
+            return {}
+
+        hints: dict[str, list[str]] = {"preferred": [], "avoid": [], "gsc_insights": []}
+        for lesson in lessons:
+            if lesson.category == "high_pass_category" and lesson.occurrences >= 2:
+                hints["preferred"].append(lesson.lesson)
+            elif lesson.category == "low_pass_category" and lesson.occurrences >= 3:
+                hints["avoid"].append(lesson.lesson)
+            elif lesson.category.startswith("gsc_"):
+                hints["gsc_insights"].append(lesson.lesson)
+        return hints
+
     def _ai_generate_brief(self, keyword: str, category: str) -> str:
         """Use Claude to generate a detailed content brief."""
+        # Include performance insights if available
+        perf_section = ""
+        hints = self._load_performance_hints()
+        if hints.get("gsc_insights"):
+            perf_section = "\n\nPerformance data from published articles:\n"
+            for insight in hints["gsc_insights"][:3]:
+                perf_section += f"- {insight}\n"
+            perf_section += "Use these insights to shape the brief.\n"
+
         prompt = f"""Generate a content brief for an SEO article targeting the keyword: "{keyword}"
 
 Category: {category}
 
 The article is for ClaimCoach (claimcoach.app), an AI tool that helps car owners fight
 lowball insurance total loss settlement offers.
-
+{perf_section}
 Provide:
 1. Suggested angle/hook (2 sentences)
 2. Key points to cover (5-7 bullets)

@@ -84,6 +84,16 @@ class BaseAgent(ABC):
         self.logger.info(f"Failed to claim any article from '{from_status}'")
         return None
 
+    def record_lesson(self, target_agent: str, category: str, lesson: str) -> None:
+        """Store a lesson for another agent to learn from."""
+        self.db.upsert_lesson(self.name, target_agent, category, lesson)
+
+    def get_lessons_for_me(
+        self, category: str | None = None, min_confidence: float = 0.0
+    ) -> list:
+        """Retrieve lessons targeted at this agent."""
+        return self.db.get_lessons(self.name, category, min_confidence)
+
     def call_claude(
         self,
         prompt: str,
