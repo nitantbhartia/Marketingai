@@ -67,6 +67,70 @@
                 </div>
             </div>
 
+            <!-- Pipeline Control Panel -->
+            <div class="pipeline-panel">
+                <div class="pipeline-header">
+                    <h2 class="section-title" style="margin-bottom: 0;">Pipeline Control</h2>
+                    <button class="btn btn-primary" id="runAllBtn" onclick="runFullPipeline()">
+                        Run Full Pipeline
+                    </button>
+                </div>
+                <p class="pipeline-desc">Trigger each stage of the article generation flow manually.</p>
+                <div class="pipeline-steps">
+                    <div class="pipeline-step" id="step-scout">
+                        <div class="step-number">1</div>
+                        <div class="step-info">
+                            <div class="step-name">Scout</div>
+                            <div class="step-desc">Discover keywords &amp; create topics</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline" onclick="triggerStep('scout', this)">Run</button>
+                    </div>
+                    <div class="pipeline-connector"></div>
+                    <div class="pipeline-step" id="step-brief">
+                        <div class="step-number">2</div>
+                        <div class="step-info">
+                            <div class="step-name">Brief Topics</div>
+                            <div class="step-desc">Generate detailed content briefs with AI</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline" onclick="triggerStep('brief-topics', this)">Run</button>
+                    </div>
+                    <div class="pipeline-connector"></div>
+                    <div class="pipeline-step" id="step-promote">
+                        <div class="step-number">3</div>
+                        <div class="step-info">
+                            <div class="step-name">Promote</div>
+                            <div class="step-desc">Move top backlog topics to writing queue</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline" onclick="triggerStep('promote', this)">Run</button>
+                    </div>
+                    <div class="pipeline-connector"></div>
+                    <div class="pipeline-step" id="step-quill">
+                        <div class="step-number">4</div>
+                        <div class="step-info">
+                            <div class="step-name">Quill</div>
+                            <div class="step-desc">Write articles using Gemini AI</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline" onclick="triggerStep('quill', this)">Run</button>
+                    </div>
+                    <div class="pipeline-connector"></div>
+                    <div class="pipeline-step" id="step-sage">
+                        <div class="step-number">5</div>
+                        <div class="step-info">
+                            <div class="step-name">Sage</div>
+                            <div class="step-desc">Review &amp; validate articles</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline" onclick="triggerStep('sage', this)">Run</button>
+                    </div>
+                </div>
+                <div class="pipeline-log" id="pipelineLog" style="display: none;">
+                    <div class="log-header">
+                        <strong>Pipeline Log</strong>
+                        <button class="btn btn-sm btn-secondary" onclick="clearLog()">Clear</button>
+                    </div>
+                    <div class="log-entries" id="logEntries"></div>
+                </div>
+            </div>
+
             <!-- Filters -->
             <div class="filters">
                 <button class="filter-btn active" data-status="all">All Articles</button>
