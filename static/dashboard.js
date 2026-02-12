@@ -46,12 +46,16 @@ function hideLoading(button) {
     button.textContent = button.dataset.originalText;
 }
 
-async function apiRequest(url, method = 'GET', data = null) {
+async function apiRequest(url, method = 'GET', data = null, timeoutMs = 30000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
     const options = {
         method,
         headers: {
             'Content-Type': 'application/json'
-        }
+        },
+        signal: controller.signal,
     };
 
     if (data) {
@@ -68,8 +72,13 @@ async function apiRequest(url, method = 'GET', data = null) {
 
         return result;
     } catch (error) {
+        if (error.name === 'AbortError') {
+            throw new Error('Request timed out');
+        }
         console.error('API request failed:', error);
         throw error;
+    } finally {
+        clearTimeout(timer);
     }
 }
 
@@ -247,22 +256,30 @@ function setStepState(stepName, state) {
     if (state) el.classList.add(`step-${state}`);
 }
 
-function pollJob(jobId) {
-    // Poll /trigger/status/{jobId} until done or error
+function pollJob(jobId, maxWaitMs = 200000) {
+    // Poll /trigger/status/{jobId} until done, error, or timeout
     return new Promise((resolve, reject) => {
+        const deadline = Date.now() + maxWaitMs;
+        let pollCount = 0;
+
         const poll = async () => {
+            if (Date.now() > deadline) {
+                return reject(new Error(`Job ${jobId} timed out after ${Math.round(maxWaitMs / 1000)}s`));
+            }
+            pollCount++;
             try {
-                const res = await apiRequest(`${API_BASE}/trigger/status/${jobId}`);
+                const res = await apiRequest(`${API_BASE}/trigger/status/${jobId}`, 'GET', null, 10000);
                 if (res.status === 'done') return resolve(res);
                 if (res.status === 'error') return reject(new Error(res.error || 'Agent failed'));
-                // Still running — poll again in 3 seconds
-                setTimeout(poll, 3000);
+                // Still running — poll again (slow down after first few polls)
+                const delay = pollCount < 5 ? 2000 : 4000;
+                setTimeout(poll, delay);
             } catch (e) {
-                // Network error polling — retry
+                // Network error polling — retry with backoff
                 setTimeout(poll, 5000);
             }
         };
-        setTimeout(poll, 2000); // First poll after 2s
+        setTimeout(poll, 1500); // First poll after 1.5s
     });
 }
 

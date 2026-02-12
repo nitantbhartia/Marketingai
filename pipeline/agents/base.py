@@ -144,7 +144,8 @@ class BaseAgent(ABC):
         self.logger.debug(f"Calling Gemini ({model_name}), prompt length={len(prompt)}")
         payload = json.dumps(body).encode()
 
-        max_retries = 4
+        max_retries = 2
+        request_timeout = 60  # seconds per request
         last_error: Exception | None = None
         for attempt in range(max_retries):
             try:
@@ -153,21 +154,36 @@ class BaseAgent(ABC):
                     data=payload,
                     headers={"Content-Type": "application/json"},
                 )
-                with urllib.request.urlopen(req, timeout=120) as resp:
+                with urllib.request.urlopen(req, timeout=request_timeout) as resp:
                     result = json.loads(resp.read())
-                text = result["candidates"][0]["content"]["parts"][0]["text"]
+
+                candidates = result.get("candidates", [])
+                if not candidates:
+                    # Gemini returned no candidates (safety filter, empty response, etc.)
+                    block_reason = result.get("promptFeedback", {}).get("blockReason", "unknown")
+                    raise ValueError(
+                        f"Gemini returned no candidates (blockReason={block_reason})"
+                    )
+
+                text = candidates[0]["content"]["parts"][0]["text"]
                 self.logger.debug(f"Gemini response length={len(text)}")
                 return text
             except urllib.error.HTTPError as e:
                 last_error = e
+                body_text = ""
+                try:
+                    body_text = e.read().decode()[:300]
+                except Exception:
+                    pass
                 if e.code in (429, 500, 503):
                     wait = (2 ** attempt) + random.uniform(0, 1)
                     self.logger.warning(
                         f"Gemini HTTP {e.code} on attempt {attempt + 1}/{max_retries}, "
-                        f"retrying in {wait:.1f}s"
+                        f"retrying in {wait:.1f}s — {body_text}"
                     )
                     time.sleep(wait)
                     continue
+                self.logger.error(f"Gemini HTTP {e.code}: {body_text}")
                 raise
             except (urllib.error.URLError, TimeoutError) as e:
                 last_error = e
