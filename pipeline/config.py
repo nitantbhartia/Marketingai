@@ -89,7 +89,7 @@ class PipelineSettings:
 class ScheduleConfig:
     scout: str = "0 */6 * * *"
     quill: str = "0 * * * *"
-    sage: str = "30 */6 * * *"
+    sage: str = "30 * * * *"
     ezra: str = "0 */4 * * *"
     herald: str = "0 10,18 * * *"
     lurker: str = "0 */8 * * *"
