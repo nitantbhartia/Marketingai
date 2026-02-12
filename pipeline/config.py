@@ -113,6 +113,11 @@ class Config:
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     # Which LLM provider to use: "anthropic" or "gemini"
     llm_provider: str = "anthropic"
+    # Per-agent provider overrides: e.g. {"sage": "anthropic"} uses Sonnet
+    # for Sage reviews even when the global provider is Gemini.
+    agent_provider_overrides: dict = field(
+        default_factory=lambda: {"sage": "anthropic"}
+    )
     _base_dir: Path = field(default_factory=lambda: Path.cwd())
 
     @classmethod
@@ -179,6 +184,10 @@ class Config:
         }
         if "llm_provider" in raw:
             self.llm_provider = raw["llm_provider"]
+        if "agent_provider_overrides" in raw and isinstance(
+            raw["agent_provider_overrides"], dict
+        ):
+            self.agent_provider_overrides = raw["agent_provider_overrides"]
         for section_name, section_obj in section_map.items():
             if section_name in raw and isinstance(raw[section_name], dict):
                 for key, value in raw[section_name].items():

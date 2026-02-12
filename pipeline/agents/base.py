@@ -30,16 +30,25 @@ class BaseAgent(ABC):
         self.logger = logging.getLogger(f"pipeline.{self.name}")
 
     @property
+    def provider(self) -> str:
+        """Get this agent's LLM provider, respecting per-agent overrides.
+
+        Checks config.agent_provider_overrides first (e.g. {"sage": "anthropic"}),
+        then falls back to the global llm_provider.
+        """
+        overrides = getattr(self.config, "agent_provider_overrides", {})
+        return overrides.get(self.name, getattr(self.config, "llm_provider", "anthropic"))
+
+    @property
     def default_model(self) -> str:
         """Get this agent's configured model, provider-aware.
 
         When using Gemini, returns the Gemini model for this agent
         (e.g. gemini-2.5-pro for Quill). When using Anthropic, returns
-        the Anthropic model (e.g. claude-sonnet for Quill).
+        the Anthropic model (e.g. claude-sonnet for Sage).
         """
         model_attr = f"{self.name}_model"
-        provider = getattr(self.config, "llm_provider", "anthropic")
-        if provider == "gemini":
+        if self.provider == "gemini":
             return getattr(
                 self.config.gemini, model_attr, self.config.gemini.default_model
             )
@@ -51,8 +60,7 @@ class BaseAgent(ABC):
 
         Always returns the fast tier: Gemini Flash or Claude Haiku.
         """
-        provider = getattr(self.config, "llm_provider", "anthropic")
-        if provider == "gemini":
+        if self.provider == "gemini":
             return self.config.gemini.default_model  # flash
         return "claude-haiku-4-5-20251001"
 
@@ -122,9 +130,12 @@ class BaseAgent(ABC):
         model: str | None = None,
         max_tokens: int = 4096,
     ) -> str:
-        """Call LLM API (Anthropic or Gemini) and return the text response."""
-        provider = getattr(self.config, "llm_provider", "anthropic")
-        if provider == "gemini":
+        """Call LLM API (Anthropic or Gemini) and return the text response.
+
+        Respects per-agent provider overrides — e.g. Sage uses Anthropic
+        Sonnet for reviews even when the global provider is Gemini.
+        """
+        if self.provider == "gemini":
             return self._call_gemini(prompt, system, model, max_tokens)
         return self._call_anthropic(prompt, system, model, max_tokens)
 
