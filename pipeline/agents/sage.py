@@ -89,8 +89,19 @@ class SageAgent(BaseAgent):
                 logger.error(
                     f"Error reviewing article {article.id}: {e}", exc_info=True
                 )
-                # Release the claim so the article can be retried on the next run
-                self.db.update_article(article.id, editor_claim="")
+                # Release the claim and send back to REVISION so Quill can retry.
+                # Without the status update, the article gets stuck in REVIEW
+                # permanently — Quill only picks up TODO/REVISION articles.
+                existing_notes = article.revision_notes or ""
+                separator = "\n\n---\n\n" if existing_notes else ""
+                error_note = f"[SAGE ERROR] Review failed: {e}. Sent back for revision."
+                self.db.update_article(
+                    article.id,
+                    editor_claim="",
+                    status=ArticleStatus.REVISION.value,
+                    revision_notes=existing_notes + separator + error_note,
+                    writer_claim="",
+                )
 
         approved = sum(1 for r in results if r["decision"] == "approved")
         revision = sum(1 for r in results if r["decision"] == "revision")
