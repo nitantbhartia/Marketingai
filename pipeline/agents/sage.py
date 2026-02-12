@@ -217,7 +217,8 @@ class SageAgent(BaseAgent):
         # Quill can automatically improve them using Sage's feedback.
         # Articles are only rejected when max revision rounds are exhausted.
         total_score = round(total_score, 1)
-        if total_score >= 90:
+        threshold = self.config.pipeline.approval_score_threshold
+        if total_score >= threshold:
             decision = "approved"
             new_status = ArticleStatus.READY_TO_PUBLISH.value
         elif article.revision_count >= self.config.pipeline.max_revision_rounds:
