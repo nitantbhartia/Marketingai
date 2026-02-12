@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from content_quality.config import PRODUCT_CONTEXT_PATH, STATE_RULES_PATH
 from content_quality.db import get_db, claim_article, log_agent_action
+from content_quality.utils.text_utils import word_count
 
 
 def load_reference_docs(target_state=None):
@@ -198,7 +199,22 @@ def write_article(article_id):
     meta_description = f"Learn about {article['target_keyword']}."[:160]  # Truncate to 160 chars
     slug = article['title'].lower().replace(' ', '-')[:50]
 
-    # Step 7: Save to database
+    # Step 7: Quality gate — same bar as the main Quill pipeline
+    wc = word_count(article_content)
+    if wc < 1500:
+        print(f"✗ Quality gate failed: word count {wc} below minimum 1500")
+        with get_db() as db:
+            db.execute("""
+                UPDATE articles SET
+                    markdown_content = ?,
+                    status = 'todo',
+                    writer_claim = '',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (article_content, article_id))
+        return None
+
+    # Step 8: Save to database
     with get_db() as db:
         db.execute("""
             UPDATE articles SET
@@ -206,12 +222,14 @@ def write_article(article_id):
                 meta_title = ?,
                 meta_description = ?,
                 slug = ?,
+                word_count = ?,
                 status = 'review',
+                writer_claim = '',
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        """, (article_content, meta_title, meta_description, slug, article_id))
+        """, (article_content, meta_title, meta_description, slug, wc, article_id))
 
-    print(f"✓ Saved draft to database (status: review)")
+    print(f"✓ Saved draft to database (status: review, {wc} words)")
 
     # Step 8: Log action
     log_agent_action(
