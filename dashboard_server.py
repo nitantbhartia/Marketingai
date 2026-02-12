@@ -580,6 +580,20 @@ async def debug_config():
     }
 
 
+@app.get("/debug/articles")
+async def debug_articles():
+    """Debug: show article statuses and writer_claim values."""
+    from content_quality.db import get_db
+    with get_db() as db:
+        cursor = db.execute("""
+            SELECT id, target_keyword, status, writer_claim, editor_claim
+            FROM articles
+            WHERE status = 'todo'
+            LIMIT 10
+        """)
+        return {"todo_articles": [dict(row) for row in cursor.fetchall()]}
+
+
 @app.get("/debug/database")
 async def debug_database():
     """Debug endpoint to see what's in the database."""
