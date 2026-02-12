@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from collections import Counter
 from typing import Any
 
 from pipeline.agents.base import BaseAgent
@@ -96,9 +98,13 @@ class QuillAgent(BaseAgent):
         published = self.db.get_published_articles()
         internal_links_context = self._format_internal_links(published)
 
+        # Extract lessons from past Sage reviews
+        lessons = self._extract_lessons()
+
         # Build the writing prompt
         prompt = self._build_prompt(
-            article, product_context, state_rules, internal_links_context, is_revision
+            article, product_context, state_rules, internal_links_context, is_revision,
+            lessons=lessons,
         )
 
         # Call Claude to write the article
@@ -174,6 +180,7 @@ class QuillAgent(BaseAgent):
         state_rules: str,
         internal_links: str,
         is_revision: bool,
+        lessons: str = "",
     ) -> str:
         parts = []
 
@@ -185,6 +192,11 @@ class QuillAgent(BaseAgent):
 
         if internal_links:
             parts.append(f"=== PUBLISHED ARTICLES (link to these) ===\n{internal_links}\n")
+
+        if lessons:
+            parts.append(
+                f"=== LESSONS FROM PAST REVIEWS (avoid these mistakes) ===\n{lessons}\n"
+            )
 
         # Writing task
         if is_revision:
@@ -222,6 +234,72 @@ class QuillAgent(BaseAgent):
         for a in published[:20]:  # Cap at 20
             url = a.published_url or f"https://claimcoach.app/blog/{a.slug}"
             lines.append(f"- [{a.title}]({url}) — keyword: {a.target_keyword}")
+        return "\n".join(lines)
+
+    def _extract_lessons(self) -> str:
+        """Extract recurring issues from recent Sage reviews to avoid repeating mistakes.
+
+        Parses revision_notes from recently reviewed articles, counts recurring
+        issues, and returns a formatted section for the writing prompt.
+        """
+        reviewed = self.db.get_reviewed_articles(limit=30)
+        if not reviewed:
+            return ""
+
+        # Parse "Issues to Fix" and per-category issues from revision notes
+        issue_counter: Counter = Counter()
+        category_lost: Counter = Counter()  # points lost per category
+
+        for article in reviewed:
+            notes = article.revision_notes
+            if not notes:
+                continue
+
+            # Extract individual issues from "### Issues to Fix:" sections
+            for block in notes.split("### Issues to Fix:"):
+                if block == notes.split("### Issues to Fix:")[0]:
+                    continue  # skip content before first "Issues to Fix"
+                for line in block.split("\n"):
+                    line = line.strip()
+                    if line.startswith("- ") and not line.startswith("- **"):
+                        issue_text = line[2:].strip()
+                        if issue_text:
+                            issue_counter[issue_text] += 1
+
+            # Extract category scores to find weak areas
+            for match in re.finditer(
+                r"\*\*(\w+)\*\*:\s*([\d.]+)/([\d.]+)", notes
+            ):
+                category = match.group(1)
+                score = float(match.group(2))
+                max_score = float(match.group(3))
+                lost = max_score - score
+                if lost > 0:
+                    category_lost[category] += lost
+
+        if not issue_counter and not category_lost:
+            return ""
+
+        lines = []
+
+        # Top weak categories
+        if category_lost:
+            worst = category_lost.most_common(3)
+            lines.append("Weakest areas across recent articles (fix these first):")
+            for category, total_lost in worst:
+                lines.append(f"  - {category}: lost {total_lost:.0f} points total")
+
+        # Top recurring issues
+        recurring = [(issue, count) for issue, count in issue_counter.most_common(10) if count >= 2]
+        if recurring:
+            lines.append("")
+            lines.append("Most common mistakes (seen in multiple articles):")
+            for issue, count in recurring:
+                lines.append(f"  - ({count}x) {issue}")
+
+        if not lines:
+            return ""
+
         return "\n".join(lines)
 
     def _parse_result(self, result: str) -> tuple[str, str]:

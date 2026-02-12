@@ -548,6 +548,16 @@ class Database:
             ).fetchall()
         return [self._row_to_article(r) for r in rows]
 
+    def get_reviewed_articles(self, limit: int = 30) -> list[Article]:
+        """Get recent articles that have been reviewed by Sage (have revision_notes)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM articles WHERE revision_notes != '' "
+                "ORDER BY updated_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._row_to_article(r) for r in rows]
+
     def get_articles_published_this_week(self) -> list[Article]:
         """Get articles published in the current week."""
         from datetime import timedelta
