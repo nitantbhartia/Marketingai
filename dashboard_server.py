@@ -68,12 +68,13 @@ async def dashboard(request: Request):
                        word_count, created_at, updated_at,
                        writer_claim, editor_claim
                 FROM articles
-                WHERE status IN ('review', 'ready_to_publish', 'revision')
+                WHERE status IN ('review', 'ready_to_publish', 'revision', 'rejected')
                 ORDER BY
                     CASE status
                         WHEN 'ready_to_publish' THEN 1
                         WHEN 'review' THEN 2
                         WHEN 'revision' THEN 3
+                        WHEN 'rejected' THEN 4
                     END,
                     updated_at DESC
             """)

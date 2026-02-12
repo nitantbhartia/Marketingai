@@ -161,6 +161,10 @@ body {
     border-left: 4px solid var(--warning);
 }
 
+.stat-rejected {
+    border-left: 4px solid #dc2626;
+}
+
 .stat-published {
     border-left: 4px solid var(--gray-500);
 }
@@ -411,6 +415,11 @@ body {
 .status-revision {
     background: #fef3c7;
     color: #92400e;
+}
+
+.status-rejected {
+    background: #fee2e2;
+    color: #991b1b;
 }
 
 .status-done {
