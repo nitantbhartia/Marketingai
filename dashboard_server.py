@@ -360,8 +360,12 @@ async def health_check():
 
 # ── Background job helpers ─────────────────────────────────
 
-def _start_agent_job(agent_name: str) -> str:
-    """Run a pipeline agent in a background thread. Returns job_id."""
+def _start_agent_job(agent_name: str, pre_hook=None) -> str:
+    """Run a pipeline agent in a background thread. Returns job_id.
+
+    Args:
+        pre_hook: Optional callable(cfg, db) to run before the agent (e.g. auto-promote).
+    """
     job_id = uuid.uuid4().hex[:8]
     _jobs[job_id] = {"status": "running", "agent": agent_name, "result": None}
 
@@ -373,6 +377,10 @@ def _start_agent_job(agent_name: str) -> str:
 
             cfg = Config.load()
             db = Database(cfg.resolve_path(cfg.pipeline.database_path))
+
+            if pre_hook:
+                pre_hook(cfg, db)
+
             result = run_agent(agent_name, cfg, db)
             _jobs[job_id] = {"status": "done", "agent": agent_name, "result": result}
         except Exception as e:
@@ -439,10 +447,50 @@ async def trigger_promote():
         }
 
 
+def _auto_promote_for_quill(cfg, db):
+    """Promote backlog → todo if no todo articles exist, so Quill has work."""
+    from pipeline.db import ArticleStatus
+    import logging
+
+    logger = logging.getLogger("trigger.quill")
+    todo_count = db.count_articles(status=ArticleStatus.TODO.value)
+    if todo_count > 0:
+        logger.info(f"Quill pre-check: {todo_count} todo articles available")
+        return
+
+    # Also check for stuck in_progress articles and reset them
+    in_progress = db.query_articles(status=ArticleStatus.IN_PROGRESS.value, limit=50)
+    for article in in_progress:
+        logger.info(f"Resetting stuck article {article.id} back to todo")
+        db.update_article(article.id, status=ArticleStatus.TODO.value, writer_claim="")
+
+    todo_count = db.count_articles(status=ArticleStatus.TODO.value)
+    if todo_count > 0:
+        logger.info(f"Recovered {todo_count} stuck articles to todo")
+        return
+
+    # Auto-promote from backlog
+    backlog = db.query_articles(
+        status=ArticleStatus.BACKLOG.value,
+        limit=3,
+        order_by="commercial_intent DESC, keyword_difficulty ASC",
+    )
+    for article in backlog:
+        db.update_article(article.id, status=ArticleStatus.TODO.value)
+        logger.info(f"Auto-promoted article {article.id}: {article.target_keyword}")
+
+    if not backlog:
+        logger.warning("No backlog articles to promote — Quill will be idle")
+
+
 @app.get("/trigger/quill")
 async def trigger_quill():
-    """Manually trigger Quill agent (runs in background)."""
-    job_id = _start_agent_job("quill")
+    """Manually trigger Quill agent (runs in background).
+
+    Auto-promotes backlog articles to 'todo' if none are available,
+    and resets any stuck 'in_progress' articles first.
+    """
+    job_id = _start_agent_job("quill", pre_hook=_auto_promote_for_quill)
     return {"status": "started", "agent": "quill", "job_id": job_id}
 
 
