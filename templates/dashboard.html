@@ -58,6 +58,14 @@
                     </div>
                 </div>
 
+                <div class="stat-card stat-rejected">
+                    <div class="stat-icon">&#x274C;</div>
+                    <div class="stat-details">
+                        <div class="stat-value">{{ status_counts.get('rejected', 0) }}</div>
+                        <div class="stat-label">Rejected</div>
+                    </div>
+                </div>
+
                 <div class="stat-card stat-published">
                     <div class="stat-icon">🚀</div>
                     <div class="stat-details">
@@ -137,6 +145,7 @@
                 <button class="filter-btn" data-status="ready_to_publish">Ready to Publish</button>
                 <button class="filter-btn" data-status="review">In Review</button>
                 <button class="filter-btn" data-status="revision">Revision</button>
+                <button class="filter-btn" data-status="rejected">Rejected</button>
             </div>
 
             <!-- Articles List -->
