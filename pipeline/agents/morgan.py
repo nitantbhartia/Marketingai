@@ -34,6 +34,9 @@ class MorganAgent(BaseAgent):
         # Distill cross-agent lessons from performance data
         checks["learning"] = self._distill_performance_lessons()
 
+        # Meta-learning: is the learning system itself working?
+        checks["learning_health"] = self._assess_learning_health()
+
         # Decay old lessons so stale patterns fade
         decayed = self.db.decay_lessons(older_than_days=30)
         if decayed:
@@ -384,4 +387,87 @@ class MorganAgent(BaseAgent):
                 result["lessons_produced"] += 1
 
         result["status"] = "ok"
+        return result
+
+    def _assess_learning_health(self) -> dict:
+        """Meta-learning: assess whether the feedback loop is actually working.
+
+        Checks:
+        1. Are lessons being produced? (Sage and Morgan writing to the table)
+        2. Are lessons being consumed? (high-confidence lessons exist)
+        3. Is pass rate improving week-over-week?
+        4. Is the lesson store growing or stagnating?
+        """
+        result: dict[str, Any] = {}
+
+        # Count lessons per target agent
+        for agent in ("quill", "scout", "herald", "lurker", "sage"):
+            lessons = self.db.get_lessons(agent)
+            result[f"{agent}_lessons"] = len(lessons)
+            high_conf = [l for l in lessons if l.confidence >= 0.6]
+            result[f"{agent}_high_confidence"] = len(high_conf)
+
+        total_lessons = sum(
+            result.get(f"{a}_lessons", 0)
+            for a in ("quill", "scout", "herald", "lurker", "sage")
+        )
+        result["total_lessons"] = total_lessons
+
+        # Compare this week's pass rate vs last week's
+        now = datetime.now(timezone.utc)
+        this_week_start = (now - timedelta(days=7)).isoformat()
+        last_week_start = (now - timedelta(days=14)).isoformat()
+
+        this_week_metrics = self.db.get_metrics(
+            name="sage_run", since=this_week_start
+        )
+        last_week_metrics = [
+            m for m in self.db.get_metrics(name="sage_run", since=last_week_start)
+            if m.timestamp < this_week_start
+        ]
+
+        def _pass_rate(metrics):
+            approved = reviewed = 0
+            for m in metrics:
+                try:
+                    d = json.loads(m.details) if m.details else {}
+                    approved += d.get("approved", 0)
+                    reviewed += d.get("approved", 0) + d.get("revision", 0) + d.get("rejected", 0)
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+            return (approved / reviewed * 100) if reviewed > 0 else None
+
+        this_rate = _pass_rate(this_week_metrics)
+        last_rate = _pass_rate(last_week_metrics)
+        result["pass_rate_this_week"] = this_rate
+        result["pass_rate_last_week"] = last_rate
+
+        if this_rate is not None and last_rate is not None:
+            delta = this_rate - last_rate
+            result["pass_rate_trend"] = round(delta, 1)
+            if delta > 5:
+                result["status"] = "improving"
+                logger.info(
+                    f"Learning health: pass rate improving "
+                    f"({last_rate:.0f}% → {this_rate:.0f}%)"
+                )
+            elif delta < -10:
+                result["alert"] = (
+                    f"Pass rate declining ({last_rate:.0f}% → {this_rate:.0f}%). "
+                    f"Lessons may not be effective — review feedback_lessons table."
+                )
+            else:
+                result["status"] = "stable"
+        else:
+            result["status"] = "insufficient_data"
+
+        # Alert if no lessons exist after the system has been running
+        if total_lessons == 0:
+            sage_metrics = self.db.get_metrics(name="sage_run", since=this_week_start)
+            if len(sage_metrics) >= 3:
+                result["alert"] = (
+                    "No lessons in feedback_lessons table despite active reviews. "
+                    "Learning system may not be recording properly."
+                )
+
         return result

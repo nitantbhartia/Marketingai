@@ -65,6 +65,9 @@ class SageAgent(BaseAgent):
 
     def run(self) -> dict[str, Any]:
         """Review all articles in 'review' status."""
+        # Load performance lessons to calibrate scoring thresholds
+        self._calibration = self._load_calibration()
+
         articles = self.db.query_articles(status=ArticleStatus.REVIEW.value, limit=20)
         if not articles:
             logger.info("No articles to review")
@@ -186,17 +189,19 @@ class SageAgent(BaseAgent):
         total_score += link_score
         all_issues.extend(link_issues)
 
-        # 6. Word count (5 pts)
+        # 6. Word count (5 pts) — calibrated from GSC performance data
         wc = word_count(content)
         wc_score = 0.0
         wc_issues = []
-        if 1800 <= wc <= 2200:
+        target_lo, target_hi = self._calibration.get("word_count_target", (1800, 2200))
+        ok_lo, ok_hi = self._calibration.get("word_count_ok", (1500, 2500))
+        if target_lo <= wc <= target_hi:
             wc_score = 5
-        elif 1500 <= wc <= 2500:
+        elif ok_lo <= wc <= ok_hi:
             wc_score = 3
-            wc_issues.append(f"Word count {wc} (target: 1800-2200)")
+            wc_issues.append(f"Word count {wc} (target: {target_lo}-{target_hi})")
         else:
-            wc_issues.append(f"Word count {wc} far from target (1800-2200)")
+            wc_issues.append(f"Word count {wc} far from target ({target_lo}-{target_hi})")
         scores["word_count"] = {"score": wc_score, "max": 5, "issues": wc_issues}
         total_score += wc_score
         all_issues.extend(wc_issues)
@@ -410,6 +415,41 @@ Format each issue on its own line starting with "- "."""
         if issues:
             return 0.0, issues
         return 5.0, []
+
+    def _load_calibration(self) -> dict:
+        """Load performance lessons from Morgan to calibrate scoring.
+
+        If GSC data shows that articles at 2400 words outperform 1800-word
+        articles, the word count target shifts. If high readability correlates
+        strongly with clicks, readability weight stays high.
+        """
+        lessons = self.db.get_lessons("sage")
+        # Also read Morgan's lessons for Quill about performance — Sage uses
+        # these to calibrate its own scoring rather than drift from reality.
+        quill_perf = self.db.get_lessons("quill", category="performance")
+
+        calibration: dict[str, Any] = {
+            "word_count_target": (1800, 2200),  # default
+            "word_count_ok": (1500, 2500),       # default acceptable range
+        }
+
+        for lesson in quill_perf:
+            text = lesson.lesson.lower()
+            # Parse "Top-performing articles average 2400 words"
+            if "average" in text and "words" in text:
+                import re as _re
+                match = _re.search(r"average\s+(\d+)\s+words", text)
+                if match and lesson.confidence >= 0.4:
+                    avg = int(match.group(1))
+                    # Shift target toward what actually performs
+                    calibration["word_count_target"] = (avg - 200, avg + 200)
+                    calibration["word_count_ok"] = (avg - 500, avg + 500)
+                    logger.info(
+                        f"Calibrated word count target to {avg-200}-{avg+200} "
+                        f"(GSC data, confidence={lesson.confidence:.1f})"
+                    )
+
+        return calibration
 
     def _record_lessons(
         self, scores: dict, all_issues: list[str], decision: str, article
