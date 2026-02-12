@@ -360,6 +360,9 @@ async def health_check():
 
 # ── Background job helpers ─────────────────────────────────
 
+_JOB_TIMEOUT = 180  # seconds — kill jobs that run longer than 3 minutes
+
+
 def _start_agent_job(agent_name: str, pre_hook=None) -> str:
     """Run a pipeline agent in a background thread. Returns job_id.
 
@@ -367,7 +370,13 @@ def _start_agent_job(agent_name: str, pre_hook=None) -> str:
         pre_hook: Optional callable(cfg, db) to run before the agent (e.g. auto-promote).
     """
     job_id = uuid.uuid4().hex[:8]
-    _jobs[job_id] = {"status": "running", "agent": agent_name, "result": None}
+    started = datetime.now()
+    _jobs[job_id] = {
+        "status": "running",
+        "agent": agent_name,
+        "result": None,
+        "started_at": started.isoformat(),
+    }
 
     def _run():
         try:
@@ -391,7 +400,20 @@ def _start_agent_job(agent_name: str, pre_hook=None) -> str:
                 "traceback": traceback.format_exc(),
             }
 
+    def _watchdog():
+        """Kill the job entry if the thread exceeds _JOB_TIMEOUT."""
+        import time
+        time.sleep(_JOB_TIMEOUT)
+        job = _jobs.get(job_id)
+        if job and job["status"] == "running":
+            _jobs[job_id] = {
+                "status": "error",
+                "agent": agent_name,
+                "error": f"Job timed out after {_JOB_TIMEOUT}s",
+            }
+
     threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_watchdog, daemon=True).start()
     return job_id
 
 
