@@ -129,6 +129,22 @@ class ScoutAgent(BaseAgent):
                 except Exception as e:
                     logger.warning(f"Failed to generate AI brief: {e}")
 
+        # Phase 4: Promote backlog articles that have a real brief to "todo"
+        # so Quill can pick them up.  Without this step articles sit in
+        # backlog forever because Quill only queries the "todo" status.
+        promoted = 0
+        backlog = self.db.query_articles(
+            status=ArticleStatus.BACKLOG.value, limit=50
+        )
+        for article in backlog:
+            # Only promote articles with a substantive AI-generated brief
+            brief = article.content_brief or ""
+            if len(brief) > 100 and not brief.startswith("Write a comprehensive"):
+                self.db.update_article(
+                    article.id, status=ArticleStatus.TODO.value
+                )
+                promoted += 1
+
         # Record metrics
         final_backlog = self.db.count_articles(ArticleStatus.BACKLOG.value)
         self.db.record_metric("scout_run", new_count + discovered, json.dumps({
@@ -136,6 +152,7 @@ class ScoutAgent(BaseAgent):
             "discovered": discovered,
             "skipped_duplicates": skipped,
             "ai_briefed": briefed,
+            "promoted_to_todo": promoted,
             "final_backlog": final_backlog,
         }))
 
@@ -144,6 +161,7 @@ class ScoutAgent(BaseAgent):
             "discovered_topics": discovered,
             "skipped_duplicates": skipped,
             "ai_briefed": briefed,
+            "promoted_to_todo": promoted,
             "final_backlog": final_backlog,
         }
         logger.info(f"Scout complete: {summary}")
@@ -263,7 +281,7 @@ Keep it concise — this is a brief, not the article."""
 
         return self.call_claude(
             prompt,
-            model=self.default_model,
+            model=self.strategy_model,
             max_tokens=500,
         )
 
@@ -281,6 +299,6 @@ Return ONLY the title, nothing else."""
 
         return self.call_claude(
             prompt,
-            model=self.default_model,
+            model=self.strategy_model,
             max_tokens=60,
         ).strip().strip('"')

@@ -31,7 +31,9 @@ class AnthropicConfig:
 class GeminiConfig:
     api_key: str = ""
     default_model: str = "gemini-2.5-flash"
-    # Per-agent model assignments — all Flash for single-tier usage
+    # Pro model used for high-trust tasks: outlines, briefs, fact checks
+    strategy_model: str = "gemini-2.5-pro"
+    # Per-agent model assignments (default_model = bulk/volume work)
     quill_model: str = "gemini-2.5-flash"
     sage_model: str = "gemini-2.5-flash"
     scout_model: str = "gemini-2.5-flash"

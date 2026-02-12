@@ -137,6 +137,7 @@ class HeraldAgent(BaseAgent):
             article.id,
             social_status="amplified",
             status=ArticleStatus.AMPLIFIED.value,
+            herald_claim="",
         )
 
         return results

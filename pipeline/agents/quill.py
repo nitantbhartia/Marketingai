@@ -342,7 +342,7 @@ Format as a clean outline with ## headers and bullet points."""
             outline = self.call_claude(
                 prompt=prompt,
                 system="You are a content strategist creating detailed article outlines.",
-                model=self.fast_model,
+                model=self.strategy_model,
                 max_tokens=1500,
             )
             logger.info(
