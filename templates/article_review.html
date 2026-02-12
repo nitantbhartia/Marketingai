@@ -271,6 +271,12 @@
                         </button>
                         {% endif %}
 
+                        {% if article.status == 'rejected' %}
+                        <button class="btn btn-primary btn-full" onclick="retryArticle()">
+                            Retry (Send back to Quill)
+                        </button>
+                        {% endif %}
+
                         {% if article.status == 'ready_to_publish' %}
                         <button class="btn btn-primary btn-full" onclick="publishNow()">
                             🚀 Publish Immediately
