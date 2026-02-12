@@ -50,11 +50,26 @@ class BaseAgent(ABC):
     def provider(self) -> str:
         """Get this agent's LLM provider, respecting per-agent overrides.
 
-        Checks config.agent_provider_overrides first (e.g. {"sage": "anthropic"}),
-        then falls back to the global llm_provider.
+        Priority:
+          1. Per-agent override (config.agent_provider_overrides)
+          2. Global llm_provider setting
+          3. Auto-detect from available API keys — if the configured
+             provider has no key but the other does, fall back.
         """
         overrides = getattr(self.config, "agent_provider_overrides", {})
-        return overrides.get(self.name, getattr(self.config, "llm_provider", "anthropic"))
+        chosen = overrides.get(
+            self.name, getattr(self.config, "llm_provider", "anthropic")
+        )
+
+        # Auto-detect: if chosen provider has no key, try the other
+        if chosen == "anthropic" and not self.config.anthropic.api_key:
+            if self.config.gemini.api_key:
+                return "gemini"
+        elif chosen == "gemini" and not self.config.gemini.api_key:
+            if self.config.anthropic.api_key:
+                return "anthropic"
+
+        return chosen
 
     @property
     def default_model(self) -> str:
