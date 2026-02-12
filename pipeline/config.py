@@ -78,7 +78,8 @@ class PipelineSettings:
     state_rules_path: str = "STATE_RULES.md"
     blog_output_dir: str = "output/blog"
     min_backlog_topics: int = 15
-    articles_per_week_target: int = 4
+    articles_per_week_target: int = 7
+    max_articles_per_run: int = 3
     max_revision_rounds: int = 5
     approval_score_threshold: int = 90
     dashboard_url: str = ""
@@ -86,9 +87,9 @@ class PipelineSettings:
 
 @dataclass
 class ScheduleConfig:
-    scout: str = "0 */8 * * *"
-    quill: str = "0 */2 * * *"
-    sage: str = "0 8,14,20 * * *"
+    scout: str = "0 */6 * * *"
+    quill: str = "0 * * * *"
+    sage: str = "30 */6 * * *"
     ezra: str = "0 */4 * * *"
     herald: str = "0 10,18 * * *"
     lurker: str = "0 */8 * * *"

@@ -151,7 +151,40 @@ class QuillAgent(BaseAgent):
     # Main entry point — three-phase pipeline
     # ------------------------------------------------------------------
     def run(self) -> dict[str, Any]:
-        """Three-phase writing pipeline: Outline → Draft → Self-Review."""
+        """Three-phase writing pipeline: Outline → Draft → Self-Review.
+
+        Processes up to ``max_articles_per_run`` articles per invocation so a
+        single scheduled run can produce multiple pieces of content.
+        """
+        max_per_run = getattr(self.config.pipeline, "max_articles_per_run", 3)
+        results: list[dict[str, Any]] = []
+
+        for _ in range(max_per_run):
+            result = self._write_one()
+            if result["status"] == "idle":
+                break  # nothing left to write
+            results.append(result)
+            if result["status"] == "error":
+                break  # stop on first error to avoid burning quota
+
+        if not results:
+            logger.info("No articles available to write")
+            return {"status": "idle", "reason": "no_articles"}
+
+        if len(results) == 1:
+            return results[0]
+
+        return {
+            "status": "batch_complete",
+            "articles_written": len([r for r in results if r["status"] == "success"]),
+            "results": results,
+        }
+
+    # ------------------------------------------------------------------
+    # Single-article pipeline (called in a loop by run())
+    # ------------------------------------------------------------------
+    def _write_one(self) -> dict[str, Any]:
+        """Write or revise a single article through the 3-phase pipeline."""
         # Try "revision" first (re-writes take priority)
         article_id = self._try_revision()
         is_revision = article_id is not None
@@ -164,7 +197,6 @@ class QuillAgent(BaseAgent):
             )
 
         if article_id is None:
-            logger.info("No articles available to write")
             return {"status": "idle", "reason": "no_articles"}
 
         article = self.db.get_article(article_id)
