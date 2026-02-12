@@ -119,6 +119,7 @@ class BaseAgent(ABC):
         self, prompt: str, system: str, model: str | None, max_tokens: int
     ) -> str:
         import json
+        import urllib.error
         import urllib.request
 
         api_key = self.config.gemini.api_key
@@ -141,17 +142,44 @@ class BaseAgent(ABC):
             body["systemInstruction"] = {"parts": [{"text": system}]}
 
         self.logger.debug(f"Calling Gemini ({model_name}), prompt length={len(prompt)}")
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            result = json.loads(resp.read())
+        payload = json.dumps(body).encode()
 
-        text = result["candidates"][0]["content"]["parts"][0]["text"]
-        self.logger.debug(f"Gemini response length={len(text)}")
-        return text
+        max_retries = 4
+        last_error: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    result = json.loads(resp.read())
+                text = result["candidates"][0]["content"]["parts"][0]["text"]
+                self.logger.debug(f"Gemini response length={len(text)}")
+                return text
+            except urllib.error.HTTPError as e:
+                last_error = e
+                if e.code in (429, 500, 503):
+                    wait = (2 ** attempt) + random.uniform(0, 1)
+                    self.logger.warning(
+                        f"Gemini HTTP {e.code} on attempt {attempt + 1}/{max_retries}, "
+                        f"retrying in {wait:.1f}s"
+                    )
+                    time.sleep(wait)
+                    continue
+                raise
+            except (urllib.error.URLError, TimeoutError) as e:
+                last_error = e
+                wait = (2 ** attempt) + random.uniform(0, 1)
+                self.logger.warning(
+                    f"Gemini network error on attempt {attempt + 1}/{max_retries}: {e}, "
+                    f"retrying in {wait:.1f}s"
+                )
+                time.sleep(wait)
+                continue
+
+        raise last_error  # type: ignore[misc]
 
 
 class Agent:
