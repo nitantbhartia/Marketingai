@@ -247,21 +247,57 @@ function setStepState(stepName, state) {
     if (state) el.classList.add(`step-${state}`);
 }
 
+function pollJob(jobId) {
+    // Poll /trigger/status/{jobId} until done or error
+    return new Promise((resolve, reject) => {
+        const poll = async () => {
+            try {
+                const res = await apiRequest(`${API_BASE}/trigger/status/${jobId}`);
+                if (res.status === 'done') return resolve(res);
+                if (res.status === 'error') return reject(new Error(res.error || 'Agent failed'));
+                // Still running — poll again in 3 seconds
+                setTimeout(poll, 3000);
+            } catch (e) {
+                // Network error polling — retry
+                setTimeout(poll, 5000);
+            }
+        };
+        setTimeout(poll, 2000); // First poll after 2s
+    });
+}
+
+function buildSummary(result) {
+    if (result.promoted !== undefined) return `Promoted ${result.promoted} articles`;
+    if (result.briefed !== undefined) return `Briefed ${result.briefed} topics`;
+    if (result.result) {
+        const r = result.result;
+        if (r.status === 'idle') return `Idle — ${r.reason || 'no work to do'}`;
+        if (r.title) return `Wrote: ${r.title} (${r.word_count || '?'} words)`;
+        return typeof r === 'string' ? r : JSON.stringify(r).slice(0, 120);
+    }
+    return 'Done';
+}
+
 async function triggerStep(stepName, button) {
     if (button) showLoading(button);
     setStepState(stepName, 'running');
     addLogEntry(`Starting <strong>${stepName}</strong>...`);
 
     try {
-        const result = await apiRequest(`${API_BASE}/trigger/${stepName}`);
+        const triggerRes = await apiRequest(`${API_BASE}/trigger/${stepName}`);
+
+        let result;
+        if (triggerRes.job_id) {
+            // Background job — poll for completion
+            addLogEntry(`<strong>${stepName}</strong> running in background (job ${triggerRes.job_id})...`);
+            result = await pollJob(triggerRes.job_id);
+        } else {
+            // Synchronous response (e.g. promote, brief-topics)
+            result = triggerRes;
+        }
+
         setStepState(stepName, 'done');
-
-        // Build a summary from the response
-        let summary = 'Done';
-        if (result.promoted !== undefined) summary = `Promoted ${result.promoted} articles`;
-        else if (result.briefed !== undefined) summary = `Briefed ${result.briefed} topics`;
-        else if (result.result) summary = typeof result.result === 'string' ? result.result : JSON.stringify(result.result).slice(0, 120);
-
+        const summary = buildSummary(result);
         addLogEntry(`<strong>${stepName}</strong> completed: ${summary}`, 'success');
         showToast(`${stepName} completed!`, 'success');
         return result;

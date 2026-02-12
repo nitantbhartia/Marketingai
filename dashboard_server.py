@@ -6,6 +6,9 @@ Receives POST notifications when articles are ready for review.
 """
 
 import json
+import threading
+import traceback
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +21,9 @@ from fastapi.templating import Jinja2Templates
 
 from content_quality.db import get_db, log_agent_action, init_database
 from content_quality.config import DATABASE_PATH, API_PORT
+
+# In-memory background job store
+_jobs: Dict[str, Dict[str, Any]] = {}
 
 
 @asynccontextmanager
@@ -352,32 +358,51 @@ async def health_check():
     }
 
 
-# Manual agent trigger endpoints
+# ── Background job helpers ─────────────────────────────────
+
+def _start_agent_job(agent_name: str) -> str:
+    """Run a pipeline agent in a background thread. Returns job_id."""
+    job_id = uuid.uuid4().hex[:8]
+    _jobs[job_id] = {"status": "running", "agent": agent_name, "result": None}
+
+    def _run():
+        try:
+            from pipeline.scheduler import run_agent
+            from pipeline.config import Config
+            from pipeline.db import Database
+
+            cfg = Config.load()
+            db = Database(cfg.resolve_path(cfg.pipeline.database_path))
+            result = run_agent(agent_name, cfg, db)
+            _jobs[job_id] = {"status": "done", "agent": agent_name, "result": result}
+        except Exception as e:
+            _jobs[job_id] = {
+                "status": "error",
+                "agent": agent_name,
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+            }
+
+    threading.Thread(target=_run, daemon=True).start()
+    return job_id
+
+
+@app.get("/trigger/status/{job_id}")
+async def trigger_status(job_id: str):
+    """Poll for background job status."""
+    job = _jobs.get(job_id)
+    if not job:
+        return {"status": "not_found"}
+    return job
+
+
+# ── Manual agent trigger endpoints ─────────────────────────
+
 @app.get("/trigger/scout")
 async def trigger_scout():
-    """Manually trigger Scout agent to create topics."""
-    try:
-        from pipeline.scheduler import run_agent
-        from pipeline.config import Config
-        from pipeline.db import Database
-
-        cfg = Config.load()
-        db = Database(cfg.resolve_path(cfg.pipeline.database_path))
-        result = run_agent("scout", cfg, db)
-
-        return {
-            "status": "success",
-            "agent": "scout",
-            "result": result
-        }
-    except Exception as e:
-        import traceback
-        return {
-            "status": "error",
-            "agent": "scout",
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }
+    """Manually trigger Scout agent (runs in background)."""
+    job_id = _start_agent_job("scout")
+    return {"status": "started", "agent": "scout", "job_id": job_id}
 
 
 @app.get("/trigger/promote")
@@ -402,12 +427,11 @@ async def trigger_promote():
             promoted.append({"id": article.id, "keyword": article.target_keyword})
 
         return {
-            "status": "success",
+            "status": "done",
             "promoted": len(promoted),
             "articles": promoted,
         }
     except Exception as e:
-        import traceback
         return {
             "status": "error",
             "error": str(e),
@@ -417,56 +441,16 @@ async def trigger_promote():
 
 @app.get("/trigger/quill")
 async def trigger_quill():
-    """Manually trigger Quill agent to write articles."""
-    try:
-        from pipeline.scheduler import run_agent
-        from pipeline.config import Config
-        from pipeline.db import Database
-
-        cfg = Config.load()
-        db = Database(cfg.resolve_path(cfg.pipeline.database_path))
-        result = run_agent("quill", cfg, db)
-
-        return {
-            "status": "success",
-            "agent": "quill",
-            "result": result
-        }
-    except Exception as e:
-        import traceback
-        return {
-            "status": "error",
-            "agent": "quill",
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }
+    """Manually trigger Quill agent (runs in background)."""
+    job_id = _start_agent_job("quill")
+    return {"status": "started", "agent": "quill", "job_id": job_id}
 
 
 @app.get("/trigger/sage")
 async def trigger_sage():
-    """Manually trigger Sage agent to review articles."""
-    try:
-        from pipeline.scheduler import run_agent
-        from pipeline.config import Config
-        from pipeline.db import Database
-
-        cfg = Config.load()
-        db = Database(cfg.resolve_path(cfg.pipeline.database_path))
-        result = run_agent("sage", cfg, db)
-
-        return {
-            "status": "success",
-            "agent": "sage",
-            "result": result
-        }
-    except Exception as e:
-        import traceback
-        return {
-            "status": "error",
-            "agent": "sage",
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }
+    """Manually trigger Sage agent (runs in background)."""
+    job_id = _start_agent_job("sage")
+    return {"status": "started", "agent": "sage", "job_id": job_id}
 
 
 @app.get("/trigger/brief-topics")
