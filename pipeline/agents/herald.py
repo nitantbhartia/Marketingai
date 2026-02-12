@@ -58,8 +58,14 @@ class HeraldAgent(BaseAgent):
             ):
                 continue
 
-            result = self._promote_article(article)
-            promoted.append(result)
+            try:
+                result = self._promote_article(article)
+                promoted.append(result)
+            except Exception as e:
+                logger.error(
+                    f"Error promoting article {article.id}: {e}", exc_info=True
+                )
+                self.db.update_article(article.id, herald_claim="")
 
         self.db.record_metric("herald_run", len(promoted))
         logger.info(f"Herald promoted {len(promoted)} articles")
