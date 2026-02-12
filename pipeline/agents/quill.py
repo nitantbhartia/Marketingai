@@ -241,8 +241,14 @@ class QuillAgent(BaseAgent):
             )
         except Exception as e:
             logger.error(f"Claude API error: {e}")
+            # Return revision articles to REVISION (not TODO) so they keep
+            # their revision context and re-enter the revision queue.
+            rollback_status = (
+                ArticleStatus.REVISION.value if is_revision
+                else ArticleStatus.TODO.value
+            )
             self.db.update_article(
-                article_id, status=ArticleStatus.TODO.value, writer_claim=""
+                article_id, status=rollback_status, writer_claim=""
             )
             return {"status": "error", "reason": str(e)}
 
