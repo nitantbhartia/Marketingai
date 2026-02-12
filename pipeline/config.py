@@ -28,6 +28,12 @@ class AnthropicConfig:
 
 
 @dataclass
+class GeminiConfig:
+    api_key: str = ""
+    default_model: str = "gemini-2.0-flash"
+
+
+@dataclass
 class BlogConfig:
     """Static blog publishing configuration."""
     output_dir: str = "./blog"
@@ -82,12 +88,15 @@ class ScheduleConfig:
 @dataclass
 class Config:
     anthropic: AnthropicConfig = field(default_factory=AnthropicConfig)
+    gemini: GeminiConfig = field(default_factory=GeminiConfig)
     blog: BlogConfig = field(default_factory=BlogConfig)
     copyscape: CopyscapeConfig = field(default_factory=CopyscapeConfig)
     reddit: RedditConfig = field(default_factory=RedditConfig)
     twitter: TwitterConfig = field(default_factory=TwitterConfig)
     pipeline: PipelineSettings = field(default_factory=PipelineSettings)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
+    # Which LLM provider to use: "anthropic" or "gemini"
+    llm_provider: str = "anthropic"
     _base_dir: Path = field(default_factory=lambda: Path.cwd())
 
     @classmethod
@@ -131,6 +140,12 @@ class Config:
         cfg.twitter.api_key = (
             os.environ.get("TWITTER_API_KEY") or cfg.twitter.api_key
         )
+        cfg.gemini.api_key = (
+            os.environ.get("GEMINI_API_KEY") or cfg.gemini.api_key
+        )
+        cfg.llm_provider = (
+            os.environ.get("LLM_PROVIDER") or cfg.llm_provider
+        )
 
         return cfg
 
@@ -138,6 +153,7 @@ class Config:
         """Apply a raw config dict to dataclass fields."""
         section_map = {
             "anthropic": self.anthropic,
+            "gemini": self.gemini,
             "blog": self.blog,
             "copyscape": self.copyscape,
             "reddit": self.reddit,
@@ -145,6 +161,8 @@ class Config:
             "pipeline": self.pipeline,
             "schedule": self.schedule,
         }
+        if "llm_provider" in raw:
+            self.llm_provider = raw["llm_provider"]
         for section_name, section_obj in section_map.items():
             if section_name in raw and isinstance(raw[section_name], dict):
                 for key, value in raw[section_name].items():
