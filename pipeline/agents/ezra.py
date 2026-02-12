@@ -5,20 +5,20 @@ Publishes approved articles to static files (markdown/HTML).
 No CMS needed - deploys to any static host (Netlify, Vercel, GitHub Pages).
 """
 
-import os
 import json
-import shutil
+import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any
+
 import markdown
 from jinja2 import Template
 
-from pipeline.agents.base import Agent
-from content_quality.db import get_db, claim_article, release_claim, add_cta_variant, log_agent_action
+from pipeline.agents.base import BaseAgent
+from pipeline.db import ArticleStatus
 
 
-class EzraAgent(Agent):
+class EzraAgent(BaseAgent):
     """
     Publisher agent - publishes articles to static files.
 
@@ -30,46 +30,42 @@ class EzraAgent(Agent):
     5. Updates status to 'done'
     """
 
-    def __init__(self, config: Dict[str, Any]):
-        super().__init__(name="ezra", config=config)
-        self.blog_dir = Path(config.get("blog_output_dir", "./blog"))
-        self.site_url = config.get("site_url", "https://claimcoach.app")
+    name = "ezra"
+    claim_field = "publisher_claim"
+
+    def __init__(self, config, db):
+        super().__init__(config=config, db=db)
+        self.blog_dir = Path(
+            getattr(config.blog, "output_dir", "./blog")
+        )
+        self.site_url = getattr(config.blog, "site_url", "https://claimcoach.app")
 
         # Create blog directories
-        self.blog_dir.mkdir(exist_ok=True)
+        self.blog_dir.mkdir(parents=True, exist_ok=True)
         (self.blog_dir / "posts").mkdir(exist_ok=True)
         (self.blog_dir / "html").mkdir(exist_ok=True)
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         """Find and publish ready articles."""
 
-        self.log("Looking for articles to publish...")
+        self.logger.info("Looking for articles to publish...")
 
-        # Get articles ready to publish
-        with get_db() as db:
-            cursor = db.execute("""
-                SELECT id, title, slug, markdown_content, meta_title,
-                       meta_description, target_keyword, target_state
-                FROM articles
-                WHERE status = 'ready_to_publish'
-                AND (publisher_claim IS NULL OR publisher_claim = '')
-                ORDER BY updated_at ASC
-                LIMIT ?
-            """, (self.config.get("max_publishes_per_run", 2),))
-
-            articles = [dict(row) for row in cursor.fetchall()]
+        articles = self.db.query_articles(
+            status=ArticleStatus.READY_TO_PUBLISH.value,
+            limit=2,
+        )
 
         if not articles:
-            self.log("No articles ready to publish")
+            self.logger.info("No articles ready to publish")
             return {"published": 0, "skipped": 0, "failed": 0}
 
-        self.log(f"Found {len(articles)} articles to publish")
+        self.logger.info(f"Found {len(articles)} articles to publish")
 
-        results = {
+        results: dict[str, Any] = {
             "published": 0,
             "skipped": 0,
             "failed": 0,
-            "articles": []
+            "articles": [],
         }
 
         for article in articles:
@@ -81,35 +77,38 @@ class EzraAgent(Agent):
                     results["failed"] += 1
                 results["articles"].append(result)
             except Exception as e:
-                self.log(f"Error publishing article {article['id']}: {e}", level="error")
+                self.logger.error(f"Error publishing article {article.id}: {e}")
                 results["failed"] += 1
                 results["articles"].append({
-                    "article_id": article["id"],
+                    "article_id": article.id,
                     "success": False,
-                    "error": str(e)
+                    "error": str(e),
                 })
 
         return results
 
-    def _publish_article(self, article: Dict[str, Any]) -> Dict[str, Any]:
+    def _publish_article(self, article) -> dict[str, Any]:
         """Publish single article to static files."""
 
-        article_id = article["id"]
+        article_id = article.id
 
         # Claim article
-        claim_id = self._generate_claim_id()
-        if not claim_article(article_id, "publisher_claim", claim_id):
+        claim_id = self.generate_claim_id()
+        if not self.db.try_claim(
+            article_id, "publisher_claim", claim_id,
+            ArticleStatus.READY_TO_PUBLISH.value,
+        ):
             return {
                 "article_id": article_id,
                 "success": False,
-                "error": "Could not claim article"
+                "error": "Could not claim article",
             }
 
-        self.log(f"Publishing: {article['title']}")
+        self.logger.info(f"Publishing: {article.title}")
 
         try:
             # Generate slug if not set
-            slug = article.get("slug") or self._slugify(article["title"])
+            slug = article.slug or self._slugify(article.title)
 
             # Save markdown file
             markdown_path = self._save_markdown(article, slug)
@@ -120,15 +119,6 @@ class EzraAgent(Agent):
             # Generate HTML file with CTAs
             html_path = self._generate_html(article, slug, cta_variants)
 
-            # Save CTA variants to database for tracking
-            for cta in cta_variants:
-                add_cta_variant(
-                    article_id=article_id,
-                    cta_text=cta["text"],
-                    cta_type=cta["type"],
-                    position=cta["position"]
-                )
-
             # Update index
             self._update_index(article, slug)
 
@@ -136,32 +126,24 @@ class EzraAgent(Agent):
             published_url = f"{self.site_url}/blog/{slug}"
 
             # Update database
-            with get_db() as db:
-                db.execute("""
-                    UPDATE articles SET
-                        slug = ?,
-                        published_url = ?,
-                        published_at = CURRENT_TIMESTAMP,
-                        status = 'done',
-                        publisher_claim = NULL,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (slug, published_url, article_id))
-
-            self.log(f"✓ Published: {published_url}")
-
-            # Log to agent_log
-            log_agent_action(
-                agent_name=self.name,
-                action="published",
-                article_id=article_id,
-                details={
-                    "slug": slug,
-                    "url": published_url,
-                    "markdown_path": str(markdown_path),
-                    "html_path": str(html_path)
-                }
+            self.db.update_article(
+                article_id,
+                slug=slug,
+                published_url=published_url,
+                published_at=datetime.now().isoformat(),
+                status=ArticleStatus.DONE.value,
+                publisher_claim="",
             )
+
+            self.logger.info(f"Published: {published_url}")
+
+            self.db.record_metric("ezra_publish", 1, json.dumps({
+                "article_id": article_id,
+                "slug": slug,
+                "url": published_url,
+                "markdown_path": str(markdown_path),
+                "html_path": str(html_path),
+            }))
 
             return {
                 "article_id": article_id,
@@ -169,48 +151,41 @@ class EzraAgent(Agent):
                 "slug": slug,
                 "url": published_url,
                 "markdown_path": str(markdown_path),
-                "html_path": str(html_path)
+                "html_path": str(html_path),
             }
 
         except Exception as e:
             # Release claim on error
-            release_claim(article_id, "publisher_claim")
+            self.db.update_article(article_id, publisher_claim="")
             raise
 
-    def _save_markdown(self, article: Dict[str, Any], slug: str) -> Path:
+    def _save_markdown(self, article, slug: str) -> Path:
         """Save article as markdown file."""
 
-        # Create frontmatter
         frontmatter = {
-            "title": article.get("meta_title") or article["title"],
-            "description": article.get("meta_description", ""),
-            "keyword": article.get("target_keyword", ""),
-            "state": article.get("target_state"),
+            "title": article.meta_title or article.title,
+            "description": article.meta_description or "",
+            "keyword": article.target_keyword or "",
+            "state": article.target_state or "",
             "slug": slug,
             "date": datetime.now().isoformat(),
         }
 
-        # Build markdown with frontmatter
         content = "---\n"
         content += json.dumps(frontmatter, indent=2)
         content += "\n---\n\n"
-        content += article["markdown_content"]
+        content += article.markdown_content
 
-        # Save to file
         filepath = self.blog_dir / "posts" / f"{slug}.md"
         filepath.write_text(content, encoding="utf-8")
 
-        self.log(f"  Saved markdown: {filepath}")
+        self.logger.info(f"  Saved markdown: {filepath}")
         return filepath
 
-    def _generate_cta_variants(self, article: Dict[str, Any]) -> List[Dict[str, str]]:
-        """
-        Generate personalized CTA variants based on article content.
-
-        Returns list of CTA dicts with type, position, heading, text, button_text.
-        """
-        state = article.get("target_state", "")
-        keyword = article.get("target_keyword", "")
+    def _generate_cta_variants(self, article) -> list[dict[str, str]]:
+        """Generate personalized CTA variants based on article content."""
+        state = article.target_state or ""
+        keyword = article.target_keyword or ""
 
         variants = []
 
@@ -222,7 +197,7 @@ class EzraAgent(Agent):
                 "heading": f"Get Your Free {state} Settlement Analysis",
                 "text": f"See if your {state} total loss offer is fair in under 5 minutes.",
                 "button_text": "Analyze Your Offer",
-                "button_url": "https://claimcoach.app"
+                "button_url": "https://claimcoach.app",
             })
         else:
             variants.append({
@@ -231,7 +206,7 @@ class EzraAgent(Agent):
                 "heading": "Get Your Free Settlement Analysis",
                 "text": "Find out if your total loss offer is fair in under 5 minutes.",
                 "button_text": "Analyze Your Offer",
-                "button_url": "https://claimcoach.app"
+                "button_url": "https://claimcoach.app",
             })
 
         # Secondary CTA - Content-aware
@@ -242,7 +217,7 @@ class EzraAgent(Agent):
                 "heading": "Not Sure If Your Offer Is Fair?",
                 "text": "Our free calculator compares your offer to actual market values.",
                 "button_text": "Check Your Settlement",
-                "button_url": "https://claimcoach.app/calculator"
+                "button_url": "https://claimcoach.app/calculator",
             })
         elif "total loss" in keyword.lower():
             variants.append({
@@ -251,7 +226,7 @@ class EzraAgent(Agent):
                 "heading": "Declared a Total Loss?",
                 "text": "Get a detailed breakdown of what your vehicle is actually worth.",
                 "button_text": "Get Your Valuation",
-                "button_url": "https://claimcoach.app"
+                "button_url": "https://claimcoach.app",
             })
         else:
             variants.append({
@@ -260,7 +235,7 @@ class EzraAgent(Agent):
                 "heading": "Questions About Your Claim?",
                 "text": "Chat with our AI assistant trained on insurance regulations.",
                 "button_text": "Ask a Question",
-                "button_url": "https://claimcoach.app/chat"
+                "button_url": "https://claimcoach.app/chat",
             })
 
         # Bottom CTA - Newsletter signup
@@ -270,26 +245,23 @@ class EzraAgent(Agent):
             "heading": "Insurance Tips in Your Inbox",
             "text": "Get weekly tips on navigating total loss claims and maximizing settlements.",
             "button_text": "Subscribe Free",
-            "button_url": "https://claimcoach.app/newsletter"
+            "button_url": "https://claimcoach.app/newsletter",
         })
 
         return variants
 
-    def _generate_html(self, article: Dict[str, Any], slug: str, cta_variants: List[Dict[str, str]]) -> Path:
+    def _generate_html(self, article, slug: str, cta_variants: list[dict[str, str]]) -> Path:
         """Generate HTML from markdown."""
 
-        # Convert markdown to HTML
         html_content = markdown.markdown(
-            article["markdown_content"],
-            extensions=['extra', 'codehilite', 'toc', 'fenced_code']
+            article.markdown_content,
+            extensions=['extra', 'codehilite', 'toc', 'fenced_code'],
         )
 
-        # Get CTA variants
         primary_cta = next((c for c in cta_variants if c["type"] == "primary"), None)
         secondary_cta = next((c for c in cta_variants if c["type"] == "secondary"), None)
         newsletter_cta = next((c for c in cta_variants if c["type"] == "newsletter"), None)
 
-        # HTML template with dynamic CTAs
         template = Template("""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -350,65 +322,53 @@ class EzraAgent(Agent):
 </html>
 """)
 
-        # Render HTML with CTAs
         html = template.render(
-            meta_title=article.get("meta_title") or article["title"],
-            meta_description=article.get("meta_description", ""),
-            target_keyword=article.get("target_keyword", ""),
-            title=article["title"],
+            meta_title=article.meta_title or article.title,
+            meta_description=article.meta_description or "",
+            target_keyword=article.target_keyword or "",
+            title=article.title,
             content=html_content,
             primary_cta=primary_cta,
             secondary_cta=secondary_cta,
             newsletter_cta=newsletter_cta,
-            year=datetime.now().year
+            year=datetime.now().year,
         )
 
-        # Save HTML file
         filepath = self.blog_dir / "html" / f"{slug}.html"
         filepath.write_text(html, encoding="utf-8")
 
-        self.log(f"  Generated HTML: {filepath}")
+        self.logger.info(f"  Generated HTML: {filepath}")
         return filepath
 
-    def _update_index(self, article: Dict[str, Any], slug: str):
+    def _update_index(self, article, slug: str):
         """Update blog index with new article."""
 
         index_path = self.blog_dir / "index.json"
 
-        # Load existing index
         if index_path.exists():
             index = json.loads(index_path.read_text())
         else:
             index = {"articles": []}
 
-        # Add new article to index
         index["articles"].insert(0, {
-            "title": article.get("meta_title") or article["title"],
-            "description": article.get("meta_description", ""),
+            "title": article.meta_title or article.title,
+            "description": article.meta_description or "",
             "slug": slug,
             "url": f"/blog/{slug}",
-            "keyword": article.get("target_keyword", ""),
-            "state": article.get("target_state"),
+            "keyword": article.target_keyword or "",
+            "state": article.target_state or "",
             "published_at": datetime.now().isoformat(),
         })
 
-        # Save index
         index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
 
-        self.log(f"  Updated index: {index_path}")
+        self.logger.info(f"  Updated index: {index_path}")
 
-    def _slugify(self, text: str) -> str:
+    @staticmethod
+    def _slugify(text: str) -> str:
         """Convert text to URL-friendly slug."""
-        import re
-
-        # Convert to lowercase
         text = text.lower()
-
-        # Replace spaces and special chars with hyphens
         text = re.sub(r'[^\w\s-]', '', text)
         text = re.sub(r'[-\s]+', '-', text)
-
-        # Remove leading/trailing hyphens
         text = text.strip('-')
-
-        return text[:50]  # Limit length
+        return text[:50]

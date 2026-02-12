@@ -64,6 +64,11 @@ class BaseAgent(ABC):
             return self.config.gemini.default_model  # flash
         return "claude-haiku-4-5-20251001"
 
+    @property
+    def has_llm(self) -> bool:
+        """True if any LLM API key is configured (Anthropic or Gemini)."""
+        return bool(self.config.anthropic.api_key or self.config.gemini.api_key)
+
     @abstractmethod
     def run(self) -> dict[str, Any]:
         """Execute the agent's main task. Returns a summary dict."""
