@@ -82,8 +82,15 @@ class SageAgent(BaseAgent):
             ):
                 continue
 
-            result = self._review_article(article)
-            results.append(result)
+            try:
+                result = self._review_article(article)
+                results.append(result)
+            except Exception as e:
+                logger.error(
+                    f"Error reviewing article {article.id}: {e}", exc_info=True
+                )
+                # Release the claim so the article can be retried on the next run
+                self.db.update_article(article.id, editor_claim="")
 
         approved = sum(1 for r in results if r["decision"] == "approved")
         revision = sum(1 for r in results if r["decision"] == "revision")
@@ -246,6 +253,8 @@ class SageAgent(BaseAgent):
             "readability_score": read_report["flesch_kincaid"],
             "word_count": wc,
             "editor_claim": "",  # Always release Sage's claim after decision
+            "validation_status": "pass" if decision == "approved" else "fail",
+            "validation_notes": revision_notes,
         }
         if decision == "revision":
             existing_notes = article.revision_notes or ""
