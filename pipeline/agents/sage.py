@@ -252,6 +252,9 @@ class SageAgent(BaseAgent):
 
         self.db.update_article(article.id, **update_kwargs)
 
+        # Record generalizable lessons for other agents
+        self._record_lessons(scores, all_issues, decision, article)
+
         # Notify dashboard
         self._notify_dashboard(article.id, decision, total_score)
 
@@ -407,6 +410,48 @@ Format each issue on its own line starting with "- "."""
         if issues:
             return 0.0, issues
         return 5.0, []
+
+    def _record_lessons(
+        self, scores: dict, all_issues: list[str], decision: str, article
+    ) -> None:
+        """Extract generalizable lessons from this review and store for other agents."""
+        # Failure lessons → Quill: what to avoid
+        if decision in ("revision", "rejected"):
+            for category, data in scores.items():
+                if data["score"] < data["max"]:
+                    for issue in data.get("issues", []):
+                        normalized = self._normalize_issue(issue)
+                        if normalized:
+                            self.record_lesson("quill", category, normalized)
+
+        # Success lessons → Quill: what works
+        if decision == "approved" and article.revision_count == 0:
+            self.record_lesson(
+                "quill", "success_pattern",
+                f"first_draft_pass category={article.content_category or 'general'}",
+            )
+
+        # Category pass/fail → Scout: which topics are feasible
+        if article.content_category:
+            if decision == "approved":
+                self.record_lesson("scout", "high_pass_category", article.content_category)
+            elif decision in ("revision", "rejected"):
+                self.record_lesson("scout", "low_pass_category", article.content_category)
+
+    @staticmethod
+    def _normalize_issue(issue: str) -> str:
+        """Normalize issue text for consistent matching across articles.
+
+        Strips article-specific numbers so "Word count 1543" and "Word count 1678"
+        both become "Word count N" and count as the same lesson.
+        """
+        if not issue or len(issue) < 5:
+            return ""
+        # Strip 3+ digit numbers (word counts, scores)
+        normalized = re.sub(r"\b\d{3,}\b", "N", issue)
+        # Strip floats in parentheses: "(55.2)" → "(N)"
+        normalized = re.sub(r"\([\d.]+\)", "(N)", normalized)
+        return normalized.strip()
 
     def _format_review(
         self,

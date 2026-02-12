@@ -145,6 +145,24 @@ class SocialPost:
     status: str = "draft"  # draft, posted, failed
 
 
+@dataclass
+class FeedbackLesson:
+    """Cross-agent learning: lessons extracted from reviews and performance data.
+
+    Produced by Sage (from reviews) and Morgan (from GSC data).
+    Consumed by Quill (writing), Scout (topic selection), and others.
+    """
+    id: str = ""
+    source_agent: str = ""   # who produced this lesson
+    target_agent: str = ""   # who should consume it
+    category: str = ""       # rubric category or "performance", "success_pattern"
+    lesson: str = ""         # the actual lesson text
+    occurrences: int = 1     # how many times this pattern was seen
+    confidence: float = 0.2  # min(1.0, occurrences / 5)
+    last_seen: str = ""
+    created_at: str = ""
+
+
 # Articles table matches the content_quality schema so dashboard and
 # pipeline agents operate on the same table.  Pipeline-specific columns
 # are added via _run_article_migrations().
@@ -245,6 +263,22 @@ CREATE TABLE IF NOT EXISTS social_posts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_social_article ON social_posts(article_id);
+
+CREATE TABLE IF NOT EXISTS feedback_lessons (
+    id TEXT PRIMARY KEY,
+    source_agent TEXT NOT NULL,
+    target_agent TEXT NOT NULL,
+    category TEXT NOT NULL,
+    lesson TEXT NOT NULL,
+    occurrences INTEGER DEFAULT 1,
+    confidence REAL DEFAULT 0.2,
+    last_seen TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(target_agent, category, lesson)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lessons_target ON feedback_lessons(target_agent);
+CREATE INDEX IF NOT EXISTS idx_lessons_confidence ON feedback_lessons(confidence);
 """
 
 # Pipeline-specific columns that may be missing if the articles table
@@ -518,6 +552,104 @@ class Database:
                 "SELECT * FROM social_posts WHERE article_id = ?", (article_id,)
             ).fetchall()
         return [SocialPost(**dict(r)) for r in rows]
+
+    # ── Feedback Lessons ─────────────────────────────────────
+
+    def upsert_lesson(
+        self,
+        source_agent: str,
+        target_agent: str,
+        category: str,
+        lesson: str,
+    ) -> FeedbackLesson:
+        """Insert or reinforce a lesson. Deduplicates on (target_agent, category, lesson)."""
+        now = self._now()
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT id, occurrences FROM feedback_lessons "
+                "WHERE target_agent = ? AND category = ? AND lesson = ?",
+                (target_agent, category, lesson),
+            ).fetchone()
+
+            if existing:
+                new_occ = existing["occurrences"] + 1
+                confidence = min(1.0, new_occ / 5)
+                conn.execute(
+                    "UPDATE feedback_lessons SET occurrences = ?, confidence = ?, "
+                    "last_seen = ?, source_agent = ? WHERE id = ?",
+                    (new_occ, confidence, now, source_agent, existing["id"]),
+                )
+                return FeedbackLesson(
+                    id=existing["id"], source_agent=source_agent,
+                    target_agent=target_agent, category=category,
+                    lesson=lesson, occurrences=new_occ,
+                    confidence=confidence, last_seen=now,
+                )
+            else:
+                lesson_id = self._new_id()
+                conn.execute(
+                    "INSERT INTO feedback_lessons "
+                    "(id, source_agent, target_agent, category, lesson, "
+                    "occurrences, confidence, last_seen, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, 1, 0.2, ?, ?)",
+                    (lesson_id, source_agent, target_agent, category,
+                     lesson, now, now),
+                )
+                return FeedbackLesson(
+                    id=lesson_id, source_agent=source_agent,
+                    target_agent=target_agent, category=category,
+                    lesson=lesson, occurrences=1, confidence=0.2,
+                    last_seen=now, created_at=now,
+                )
+
+    def get_lessons(
+        self,
+        target_agent: str,
+        category: str | None = None,
+        min_confidence: float = 0.0,
+        limit: int = 30,
+    ) -> list[FeedbackLesson]:
+        """Get lessons for a specific agent, ordered by confidence then occurrences."""
+        conditions = ["target_agent = ?"]
+        params: list = [target_agent]
+        if category:
+            conditions.append("category = ?")
+            params.append(category)
+        if min_confidence > 0:
+            conditions.append("confidence >= ?")
+            params.append(min_confidence)
+
+        where = " AND ".join(conditions)
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM feedback_lessons WHERE {where} "
+                "ORDER BY confidence DESC, occurrences DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [FeedbackLesson(**dict(r)) for r in rows]
+
+    def decay_lessons(self, older_than_days: int = 30) -> int:
+        """Reduce occurrences of stale lessons. Delete those that reach zero.
+
+        Called by Morgan during health checks to prevent outdated lessons
+        from dominating. Returns number of lessons decayed.
+        """
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+        with self._connect() as conn:
+            # Decrement occurrences for old lessons
+            conn.execute(
+                "UPDATE feedback_lessons SET occurrences = occurrences - 1, "
+                "confidence = MAX(0, (occurrences - 1.0) / 5.0) "
+                "WHERE last_seen < ?",
+                (cutoff,),
+            )
+            # Delete lessons that have decayed to zero
+            cursor = conn.execute(
+                "DELETE FROM feedback_lessons WHERE occurrences <= 0"
+            )
+            return cursor.rowcount
 
     # ── Pipeline Stats ───────────────────────────────────────
 
