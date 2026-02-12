@@ -436,28 +436,26 @@ class Database:
     def try_claim(
         self, article_id: int, claim_field: str, claim_id: str, new_status: str
     ) -> bool:
-        """Attempt to claim an article. Returns True if successful."""
-        with self._connect() as conn:
-            # Check current claim is empty
-            row = conn.execute(
-                f"SELECT {claim_field} FROM articles WHERE id = ?", (article_id,)
-            ).fetchone()
-            if row is None:
-                return False
-            if row[0] and row[0] != "":
-                return False
+        """Attempt to atomically claim an article. Returns True if successful.
 
-            # Set claim and status
-            conn.execute(
-                f"UPDATE articles SET {claim_field} = ?, status = ?, updated_at = ? WHERE id = ?",
+        Uses a conditional UPDATE so the check-and-set is a single statement,
+        preventing two concurrent callers from both winning the claim.
+        """
+        # Validate claim_field against known columns to prevent SQL injection
+        valid_fields = {"writer_claim", "editor_claim", "publisher_claim", "herald_claim"}
+        if claim_field not in valid_fields:
+            raise ValueError(f"Invalid claim field: {claim_field}")
+
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"UPDATE articles SET {claim_field} = ?, status = ?, updated_at = ? "
+                f"WHERE id = ? AND ({claim_field} = '' OR {claim_field} IS NULL)",
                 (claim_id, new_status, self._now(), article_id),
             )
+            if cursor.rowcount == 0:
+                return False
 
-        # Verify the claim stuck
-        article = self.get_article(article_id)
-        if article is None:
-            return False
-        return getattr(article, claim_field) == claim_id
+        return True
 
     # ── Opportunity CRUD ─────────────────────────────────────
 

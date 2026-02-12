@@ -243,27 +243,39 @@ class QuillAgent(BaseAgent):
             )
             return {"status": "error", "reason": str(e)}
 
-        content, meta_description = self._parse_result(result_text)
-        title = article.suggested_title or article.title or article.target_keyword.title()
+        try:
+            content, meta_description = self._parse_result(result_text)
+            title = article.suggested_title or article.title or article.target_keyword.title()
 
-        # ── Phase 3: Self-review & auto-fix ──
-        content, meta_description, fixes = self._self_review_and_fix(
-            content, meta_description, article,
-        )
+            # ── Phase 3: Self-review & auto-fix ──
+            content, meta_description, fixes = self._self_review_and_fix(
+                content, meta_description, article,
+            )
 
-        slug = self._generate_slug(title)
-        wc = word_count(content)
+            slug = self._generate_slug(title)
+            wc = word_count(content)
 
-        # Save and submit to Sage
-        self.db.update_article(
-            article_id,
-            title=title,
-            markdown_content=content,
-            meta_description=meta_description,
-            slug=slug,
-            word_count=wc,
-            status=ArticleStatus.REVIEW.value,
-        )
+            # Save and submit to Sage
+            self.db.update_article(
+                article_id,
+                title=title,
+                markdown_content=content,
+                meta_description=meta_description,
+                slug=slug,
+                word_count=wc,
+                status=ArticleStatus.REVIEW.value,
+                writer_claim="",
+            )
+        except Exception as e:
+            logger.error(f"Post-draft error for article {article_id}: {e}", exc_info=True)
+            rollback_status = (
+                ArticleStatus.REVISION.value if is_revision
+                else ArticleStatus.TODO.value
+            )
+            self.db.update_article(
+                article_id, status=rollback_status, writer_claim=""
+            )
+            return {"status": "error", "reason": str(e)}
 
         self.db.record_metric("quill_write", wc, json.dumps({
             "article_id": article_id,
@@ -759,19 +771,29 @@ Format as a clean outline with ## headers and bullet points."""
                 logger.warning(f"Targeted LLM fix failed: {e}")
                 return None  # Fall through to full rewrite
 
-        slug = self._generate_slug(
-            article.suggested_title or article.title or article.target_keyword.title()
-        )
-        wc = word_count(content)
+        try:
+            slug = self._generate_slug(
+                article.suggested_title or article.title or article.target_keyword.title()
+            )
+            wc = word_count(content)
 
-        self.db.update_article(
-            article.id,
-            markdown_content=content,
-            meta_description=meta,
-            slug=slug,
-            word_count=wc,
-            status=ArticleStatus.REVIEW.value,
-        )
+            self.db.update_article(
+                article.id,
+                markdown_content=content,
+                meta_description=meta,
+                slug=slug,
+                word_count=wc,
+                status=ArticleStatus.REVIEW.value,
+                writer_claim="",
+            )
+        except Exception as e:
+            logger.error(
+                f"Post-revision error for article {article.id}: {e}", exc_info=True
+            )
+            self.db.update_article(
+                article.id, status=ArticleStatus.REVISION.value, writer_claim=""
+            )
+            return None  # Fall through to full rewrite
 
         self.db.record_metric("quill_write", wc, json.dumps({
             "article_id": article.id,
