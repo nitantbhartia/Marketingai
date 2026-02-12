@@ -194,7 +194,7 @@ FACEBOOK:
         try:
             result = self.call_claude(
                 prompt,
-                model=self.default_model,
+                model=self.utility_model,
                 max_tokens=1500,
             )
             return self._parse_social_content(result)

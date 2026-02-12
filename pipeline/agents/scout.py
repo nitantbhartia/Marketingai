@@ -299,6 +299,6 @@ Return ONLY the title, nothing else."""
 
         return self.call_claude(
             prompt,
-            model=self.strategy_model,
+            model=self.utility_model,
             max_tokens=60,
         ).strip().strip('"')
