@@ -125,7 +125,9 @@ class BaseAgent(ABC):
         if not api_key:
             raise ValueError("Gemini API key not configured")
 
-        model_name = model or self.config.gemini.default_model
+        # Ignore Anthropic model names passed from callers; use Gemini config
+        is_anthropic_model = model and ("claude" in model or "anthropic" in model)
+        model_name = self.config.gemini.default_model if (not model or is_anthropic_model) else model
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model_name}:generateContent?key={api_key}"
