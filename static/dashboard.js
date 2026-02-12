@@ -212,6 +212,101 @@ async function publishNow() {
     }
 }
 
+// ── Pipeline Control Functions ─────────────────────────────
+
+const PIPELINE_STEPS = ['scout', 'brief-topics', 'promote', 'quill', 'sage'];
+
+function addLogEntry(message, type = 'info') {
+    const logPanel = document.getElementById('pipelineLog');
+    const logEntries = document.getElementById('logEntries');
+    if (!logPanel || !logEntries) return;
+
+    logPanel.style.display = 'block';
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry log-${type}`;
+    const time = new Date().toLocaleTimeString();
+    entry.innerHTML = `<span class="log-time">[${time}]</span> ${message}`;
+    logEntries.appendChild(entry);
+    logEntries.scrollTop = logEntries.scrollHeight;
+}
+
+function clearLog() {
+    const logEntries = document.getElementById('logEntries');
+    const logPanel = document.getElementById('pipelineLog');
+    if (logEntries) logEntries.innerHTML = '';
+    if (logPanel) logPanel.style.display = 'none';
+}
+
+function setStepState(stepName, state) {
+    // Map trigger name to step element id
+    const idMap = { 'scout': 'step-scout', 'brief-topics': 'step-brief', 'promote': 'step-promote', 'quill': 'step-quill', 'sage': 'step-sage' };
+    const el = document.getElementById(idMap[stepName]);
+    if (!el) return;
+    el.classList.remove('step-running', 'step-done', 'step-error');
+    if (state) el.classList.add(`step-${state}`);
+}
+
+async function triggerStep(stepName, button) {
+    if (button) showLoading(button);
+    setStepState(stepName, 'running');
+    addLogEntry(`Starting <strong>${stepName}</strong>...`);
+
+    try {
+        const result = await apiRequest(`${API_BASE}/trigger/${stepName}`);
+        setStepState(stepName, 'done');
+
+        // Build a summary from the response
+        let summary = 'Done';
+        if (result.promoted !== undefined) summary = `Promoted ${result.promoted} articles`;
+        else if (result.briefed !== undefined) summary = `Briefed ${result.briefed} topics`;
+        else if (result.result) summary = typeof result.result === 'string' ? result.result : JSON.stringify(result.result).slice(0, 120);
+
+        addLogEntry(`<strong>${stepName}</strong> completed: ${summary}`, 'success');
+        showToast(`${stepName} completed!`, 'success');
+        return result;
+    } catch (error) {
+        setStepState(stepName, 'error');
+        addLogEntry(`<strong>${stepName}</strong> failed: ${error.message}`, 'error');
+        showToast(`${stepName} failed: ${error.message}`, 'error');
+        throw error;
+    } finally {
+        if (button) hideLoading(button);
+    }
+}
+
+async function runFullPipeline() {
+    const runAllBtn = document.getElementById('runAllBtn');
+    if (runAllBtn) showLoading(runAllBtn);
+
+    // Reset all step states
+    PIPELINE_STEPS.forEach(s => setStepState(s, null));
+    clearLog();
+
+    addLogEntry('Starting full pipeline...', 'info');
+
+    for (const step of PIPELINE_STEPS) {
+        try {
+            await triggerStep(step, null);
+        } catch (e) {
+            addLogEntry(`Pipeline stopped at <strong>${step}</strong>. Fix the issue and retry.`, 'error');
+            if (runAllBtn) hideLoading(runAllBtn);
+            return;
+        }
+    }
+
+    addLogEntry('Full pipeline completed! Refreshing dashboard...', 'success');
+    showToast('Full pipeline completed!', 'success');
+    if (runAllBtn) hideLoading(runAllBtn);
+
+    // Refresh dashboard after a short delay to show new articles
+    setTimeout(() => window.location.reload(), 2000);
+}
+
+function refreshDashboard() {
+    window.location.reload();
+}
+
 // ── Content Display Functions ──────────────────────────────
 
 function showFullContent() {
