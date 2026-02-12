@@ -31,8 +31,10 @@ class AnthropicConfig:
 class GeminiConfig:
     api_key: str = ""
     default_model: str = "gemini-2.5-flash"
-    # Pro model used for high-trust tasks: outlines, briefs, fact checks
+    # Pro model for high-trust tasks: outlines, briefs, fact checks (100 RPD)
     strategy_model: str = "gemini-2.5-pro"
+    # Flash-Lite for repetitive utility tasks: meta descriptions, alt-text (1000 RPD)
+    utility_model: str = "gemini-2.5-flash-lite"
     # Per-agent model assignments (default_model = bulk/volume work)
     quill_model: str = "gemini-2.5-flash"
     sage_model: str = "gemini-2.5-flash"
@@ -40,8 +42,14 @@ class GeminiConfig:
     morgan_model: str = "gemini-2.5-flash"
     herald_model: str = "gemini-2.5-flash"
     lurker_model: str = "gemini-2.5-flash"
+    # Daily request budgets per tier
+    pro_daily_budget: int = 20
+    flash_daily_budget: int = 250
+    flash_lite_daily_budget: int = 1000
     # Minimum seconds between API calls (free tier = 5 RPM → 12s)
     rate_limit_delay: float = 12.0
+    # Enable Google Search grounding for Pro calls (insurance law freshness)
+    search_grounding: bool = True
 
 
 @dataclass

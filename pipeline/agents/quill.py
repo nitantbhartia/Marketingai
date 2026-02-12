@@ -226,23 +226,14 @@ class QuillAgent(BaseAgent):
             article, product_context, state_rules, internal_links_context,
         )
 
-        # ── Phase 2: Write full article from outline ──
-        prompt = self._build_prompt(
-            article, product_context, state_rules, internal_links_context,
-            is_revision=is_revision, lessons=lessons, outline=outline,
-        )
-
+        # ── Phase 2: Write article (section-by-section from outline) ──
         try:
-            result_text = self.call_claude(
-                prompt=prompt,
-                system=self._build_system_prompt(article.content_category),
-                model=self.default_model,
-                max_tokens=8192,
+            result_text = self._draft_from_outline(
+                article, outline, product_context, state_rules,
+                internal_links_context, is_revision, lessons,
             )
         except Exception as e:
-            logger.error(f"Claude API error: {e}")
-            # Return revision articles to REVISION (not TODO) so they keep
-            # their revision context and re-enter the revision queue.
+            logger.error(f"Draft error: {e}")
             rollback_status = (
                 ArticleStatus.REVISION.value if is_revision
                 else ArticleStatus.TODO.value
@@ -356,6 +347,123 @@ Format as a clean outline with ## headers and bullet points."""
 
     # ------------------------------------------------------------------
     # Phase 2: Build the writing prompt
+    # ------------------------------------------------------------------
+    # Phase 2: Section-by-section drafting (Flash muscle)
+    # ------------------------------------------------------------------
+    def _draft_from_outline(
+        self, article, outline: str, product_context: str,
+        state_rules: str, internal_links: str,
+        is_revision: bool, lessons: str,
+    ) -> str:
+        """Draft the article section-by-section using Flash.
+
+        If the Pro-generated outline has clear H2 sections, each section
+        is drafted individually — Flash excels at following strict structure.
+        Falls back to single-shot drafting when the outline is empty or
+        doesn't parse into sections.
+        """
+        sections = self._parse_outline_sections(outline) if outline else []
+
+        # Fall back to monolithic draft if outline didn't yield sections
+        if len(sections) < 3:
+            prompt = self._build_prompt(
+                article, product_context, state_rules, internal_links,
+                is_revision=is_revision, lessons=lessons, outline=outline,
+            )
+            return self.call_claude(
+                prompt=prompt,
+                system=self._build_system_prompt(article.content_category),
+                model=self.fast_model,
+                max_tokens=8192,
+            )
+
+        # ── Section-by-section drafting ──
+        system = self._build_system_prompt(article.content_category)
+        context_block = (
+            f"=== PRODUCT CONTEXT ===\n{product_context[:2000]}\n\n"
+            f"=== FULL ARTICLE OUTLINE ===\n{outline}\n\n"
+        )
+        if article.target_state and state_rules:
+            context_block += f"=== STATE RULES ===\n{state_rules[:1500]}\n\n"
+        if internal_links:
+            context_block += f"=== INTERNAL LINKS ===\n{internal_links}\n\n"
+        if lessons:
+            context_block += f"=== PAST LESSONS ===\n{lessons}\n\n"
+
+        drafted_sections: list[str] = []
+        keyword = article.target_keyword
+
+        for i, (heading, bullets) in enumerate(sections):
+            is_first = i == 0
+            is_last = i == len(sections) - 1
+            section_prompt = (
+                f"{context_block}"
+                f"Target keyword: {keyword}\n\n"
+                f"You are writing SECTION {i + 1} of {len(sections)} for this article.\n"
+                f"Section heading: {heading}\n"
+                f"Key points for this section:\n{bullets}\n\n"
+            )
+            if is_first:
+                section_prompt += (
+                    "This is the OPENING section. Include the keyword naturally in "
+                    "the first 100 words. Open with empathy and a strong hook.\n"
+                )
+            if is_last:
+                section_prompt += (
+                    "This is the CLOSING section. End with a clear CTA pointing to "
+                    "ClaimCoach (claimcoach.app). After the section, output:\n"
+                    "META_DESCRIPTION: <150-160 character meta description>\n"
+                )
+            if not is_first:
+                section_prompt += (
+                    f"\n=== PREVIOUSLY WRITTEN (for continuity) ===\n"
+                    f"{drafted_sections[-1][-500:]}\n\n"
+                )
+            section_prompt += (
+                f"Write ONLY this section (heading + 200-350 words). "
+                f"Use ## for the H2 heading. Output Markdown only."
+            )
+
+            section_text = self.call_claude(
+                prompt=section_prompt,
+                system=system,
+                model=self.fast_model,
+                max_tokens=1500,
+            )
+            drafted_sections.append(section_text.strip())
+            logger.debug(
+                f"Drafted section {i + 1}/{len(sections)}: {heading} "
+                f"({len(section_text)} chars)"
+            )
+
+        return "\n\n".join(drafted_sections)
+
+    @staticmethod
+    def _parse_outline_sections(outline: str) -> list[tuple[str, str]]:
+        """Parse a Pro-generated outline into (heading, bullet_points) tuples.
+
+        Splits on ## headings and captures everything between them as the
+        bullet-point context for that section.
+        """
+        sections: list[tuple[str, str]] = []
+        current_heading = ""
+        current_lines: list[str] = []
+
+        for line in outline.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("## "):
+                if current_heading:
+                    sections.append((current_heading, "\n".join(current_lines)))
+                current_heading = stripped
+                current_lines = []
+            elif current_heading:
+                current_lines.append(line)
+
+        if current_heading:
+            sections.append((current_heading, "\n".join(current_lines)))
+
+        return sections
+
     # ------------------------------------------------------------------
     def _build_system_prompt(self, content_category: str) -> str:
         """Build category-aware system prompt."""
@@ -529,7 +637,7 @@ Format as a clean outline with ## headers and bullet points."""
         return content, meta_description, fixes
 
     def _generate_faq_block(self, article) -> str:
-        """Generate a quick FAQ section using the LLM."""
+        """Generate a quick FAQ section using Flash-Lite (utility tier)."""
         try:
             result = self.call_claude(
                 prompt=(
@@ -539,7 +647,7 @@ Format as a clean outline with ## headers and bullet points."""
                     f"### Question here?\n\nAnswer here.\n\n"
                     f"Make questions real things people search for."
                 ),
-                model=self.fast_model,
+                model=self.utility_model,
                 max_tokens=800,
             )
             return result.strip()
@@ -548,9 +656,24 @@ Format as a clean outline with ## headers and bullet points."""
             return ""
 
     def _generate_meta(self, article) -> str:
-        """Generate a meta description."""
+        """Generate a meta description using Flash-Lite (utility tier)."""
         keyword = article.target_keyword or ""
-        # Simple template fallback — no LLM needed
+        try:
+            result = self.call_claude(
+                prompt=(
+                    f'Write a meta description (150-160 chars) for an article about '
+                    f'"{keyword}" for ClaimCoach. Include the keyword, an emotional '
+                    f'hook, and a reason to click. Return ONLY the meta description.'
+                ),
+                model=self.utility_model,
+                max_tokens=80,
+            )
+            meta = result.strip().strip('"')
+            if 100 < len(meta) <= 165:
+                return meta
+        except Exception as e:
+            logger.debug(f"LLM meta generation failed, using template: {e}")
+        # Template fallback
         return (
             f"Learn how to handle {keyword.lower()}. "
             f"Step-by-step guide with specific strategies to fight back "

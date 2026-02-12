@@ -8,6 +8,7 @@ import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from typing import Any
 
 from pipeline.config import Config
@@ -16,6 +17,22 @@ from pipeline.db import Database
 # Module-level rate limiter shared across all agents in the same process.
 _gemini_lock = threading.Lock()
 _gemini_last_call: float = 0.0
+
+# --------------------------------------------------------------------------
+# Daily budget tracker — prevents burning through rate-limited Pro tier
+# --------------------------------------------------------------------------
+_budget_lock = threading.Lock()
+_budget_counters: dict[str, int] = {}  # "pro:2026-02-12" → call count
+_TIER_LIMITS: dict[str, str] = {
+    "gemini-2.5-pro": "pro_daily_budget",
+    "gemini-2.5-flash": "flash_daily_budget",
+    "gemini-2.5-flash-lite": "flash_lite_daily_budget",
+}
+
+
+def _budget_key(model: str) -> str:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return f"{model}:{today}"
 
 
 class BaseAgent(ABC):
@@ -80,9 +97,43 @@ class BaseAgent(ABC):
         )
 
     @property
+    def utility_model(self) -> str:
+        """Cheapest model for repetitive utility tasks: meta descriptions, alt-text.
+
+        Returns Gemini Flash-Lite (1000 RPD) or Claude Haiku.
+        """
+        if self.provider == "gemini":
+            return getattr(
+                self.config.gemini, "utility_model", "gemini-2.5-flash-lite"
+            )
+        return "claude-haiku-4-5-20251001"
+
+    @property
     def has_llm(self) -> bool:
         """True if any LLM API key is configured (Anthropic or Gemini)."""
         return bool(self.config.anthropic.api_key or self.config.gemini.api_key)
+
+    def _check_budget(self, model: str) -> bool:
+        """Check if we have remaining budget for this model tier today.
+
+        Returns True if the call is allowed, False if budget exhausted.
+        When Pro budget is exhausted, callers should fall back to Flash.
+        """
+        budget_attr = _TIER_LIMITS.get(model)
+        if not budget_attr:
+            return True  # Unknown model — allow
+
+        limit = getattr(self.config.gemini, budget_attr, 9999)
+        key = _budget_key(model)
+
+        with _budget_lock:
+            return _budget_counters.get(key, 0) < limit
+
+    def _record_budget_usage(self, model: str) -> None:
+        """Record one API call against the daily budget for this model."""
+        key = _budget_key(model)
+        with _budget_lock:
+            _budget_counters[key] = _budget_counters.get(key, 0) + 1
 
     @abstractmethod
     def run(self) -> dict[str, Any]:
@@ -207,6 +258,15 @@ class BaseAgent(ABC):
         # Ignore Anthropic model names passed from callers; use Gemini config
         is_anthropic_model = model and ("claude" in model or "anthropic" in model)
         model_name = self.config.gemini.default_model if (not model or is_anthropic_model) else model
+
+        # ── Budget gate: auto-downgrade Pro → Flash when daily limit hit ──
+        if not self._check_budget(model_name):
+            fallback = self.config.gemini.default_model
+            self.logger.warning(
+                f"Budget exhausted for {model_name}, falling back to {fallback}"
+            )
+            model_name = fallback
+
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model_name}:generateContent?key={api_key}"
@@ -218,6 +278,14 @@ class BaseAgent(ABC):
         }
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
+
+        # ── Search Grounding: enable for Pro calls (insurance law freshness) ──
+        use_grounding = (
+            "pro" in model_name
+            and getattr(self.config.gemini, "search_grounding", False)
+        )
+        if use_grounding:
+            body["tools"] = [{"google_search": {}}]
 
         self.logger.debug(f"Calling Gemini ({model_name}), prompt length={len(prompt)}")
         payload = json.dumps(body).encode()
@@ -244,7 +312,11 @@ class BaseAgent(ABC):
                     )
 
                 text = candidates[0]["content"]["parts"][0]["text"]
-                self.logger.debug(f"Gemini response length={len(text)}")
+                self._record_budget_usage(model_name)
+                self.logger.debug(
+                    f"Gemini response length={len(text)} "
+                    f"[{model_name} budget: {_budget_counters.get(_budget_key(model_name), 0)}]"
+                )
                 return text
             except urllib.error.HTTPError as e:
                 last_error = e
