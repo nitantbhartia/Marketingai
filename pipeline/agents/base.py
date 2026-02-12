@@ -86,10 +86,18 @@ class BaseAgent(ABC):
         model: str | None = None,
         max_tokens: int = 4096,
     ) -> str:
-        """Call Claude API and return the text response."""
+        """Call LLM API (Anthropic or Gemini) and return the text response."""
+        provider = getattr(self.config, "llm_provider", "anthropic")
+        if provider == "gemini":
+            return self._call_gemini(prompt, system, model, max_tokens)
+        return self._call_anthropic(prompt, system, model, max_tokens)
+
+    def _call_anthropic(
+        self, prompt: str, system: str, model: str | None, max_tokens: int
+    ) -> str:
         import anthropic
 
-        api_key = self.config.anthropic.api_key or None  # None lets SDK use env var
+        api_key = self.config.anthropic.api_key or None
         client = anthropic.Anthropic(api_key=api_key)
         model = model or self.default_model
 
@@ -105,6 +113,42 @@ class BaseAgent(ABC):
         response = client.messages.create(**kwargs)
         text = response.content[0].text
         self.logger.debug(f"Claude response length={len(text)}")
+        return text
+
+    def _call_gemini(
+        self, prompt: str, system: str, model: str | None, max_tokens: int
+    ) -> str:
+        import json
+        import urllib.request
+
+        api_key = self.config.gemini.api_key
+        if not api_key:
+            raise ValueError("Gemini API key not configured")
+
+        model_name = model or self.config.gemini.default_model
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model_name}:generateContent?key={api_key}"
+        )
+
+        body: dict[str, Any] = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": max_tokens},
+        }
+        if system:
+            body["systemInstruction"] = {"parts": [{"text": system}]}
+
+        self.logger.debug(f"Calling Gemini ({model_name}), prompt length={len(prompt)}")
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read())
+
+        text = result["candidates"][0]["content"]["parts"][0]["text"]
+        self.logger.debug(f"Gemini response length={len(text)}")
         return text
 
 
