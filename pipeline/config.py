@@ -13,8 +13,8 @@ import yaml
 class AnthropicConfig:
     api_key: str = ""
     # Per-agent model assignments (cost-optimized defaults)
-    # Quill (writer): Haiku for cost; upgrade to Sonnet if quality needs improvement
-    quill_model: str = "claude-haiku-4-5-20251001"
+    # Quill (writer): Sonnet for quality long-form content
+    quill_model: str = "claude-sonnet-4-5-20250929"
     # Sage (reviewer): Sonnet for better reasoning on quality checks
     sage_model: str = "claude-sonnet-4-5-20250929"
     # Scout (research): Haiku — structured keyword processing
