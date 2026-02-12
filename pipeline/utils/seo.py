@@ -5,6 +5,35 @@ from __future__ import annotations
 import re
 
 
+def _keyword_match(keyword: str, text: str) -> bool:
+    """Check if all words in *keyword* appear in *text*.
+
+    Tries three strategies in order:
+      1. Exact substring (fastest, strictest)
+      2. All words in order with up to 30 chars between each
+         ("total loss settlement california" matches
+          "Total Loss Settlement in California")
+      3. All words present anywhere in the text
+         ("California total loss settlement" also matches)
+    """
+    kw = keyword.lower().strip()
+    txt = text.lower()
+    if not kw:
+        return False
+    # Fast path: exact substring
+    if kw in txt:
+        return True
+    parts = kw.split()
+    if len(parts) <= 1:
+        return False
+    # Words in order with gaps
+    pattern = r"\b" + r"\b.{0,30}\b".join(re.escape(w) for w in parts) + r"\b"
+    if re.search(pattern, txt):
+        return True
+    # All words present (any order)
+    return all(re.search(r"\b" + re.escape(w) + r"\b", txt) for w in parts)
+
+
 def score_seo(
     content: str,
     title: str,
@@ -17,17 +46,16 @@ def score_seo(
     """Score an article's SEO quality on a 0-20 scale. Returns (score, issues)."""
     score = 0.0
     issues: list[str] = []
-    keyword_lower = keyword.lower()
 
     # Keyword in title (3 pts)
-    if keyword_lower in title.lower():
+    if _keyword_match(keyword, title):
         score += 3
     else:
         issues.append(f"Keyword '{keyword}' not in title")
 
     # Keyword in first paragraph / first 100 words (3 pts)
-    first_500_chars = content[:500].lower()
-    if keyword_lower in first_500_chars:
+    first_500_chars = content[:500]
+    if _keyword_match(keyword, first_500_chars):
         score += 3
     else:
         issues.append("Keyword not in first 100 words")
@@ -35,7 +63,7 @@ def score_seo(
     # Keyword in H2 headers (3 pts - need at least 2)
     h2_pattern = re.compile(r"^##\s+(.+)$", re.MULTILINE)
     h2s = h2_pattern.findall(content)
-    h2_keyword_count = sum(1 for h in h2s if keyword_lower in h.lower())
+    h2_keyword_count = sum(1 for h in h2s if _keyword_match(keyword, h))
     if h2_keyword_count >= 2:
         score += 3
     elif h2_keyword_count == 1:
@@ -54,7 +82,7 @@ def score_seo(
         else:
             issues.append(f"Meta description length {len(meta_description)} (target 150-160)")
 
-        if keyword_lower in meta_description.lower():
+        if _keyword_match(keyword, meta_description):
             score += 1
         else:
             issues.append("Keyword not in meta description")
