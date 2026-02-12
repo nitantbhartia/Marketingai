@@ -255,6 +255,36 @@ class QuillAgent(BaseAgent):
             slug = self._generate_slug(title)
             wc = word_count(content)
 
+            # ── Quality gate: don't waste a Sage review on content that
+            # clearly can't pass the approval threshold. ──
+            gate_pass, gate_reason = self._passes_minimum_bar(content, wc)
+            if not gate_pass:
+                logger.warning(
+                    f"Article {article_id} failed quality gate: {gate_reason}"
+                )
+                rollback_status = (
+                    ArticleStatus.REVISION.value if is_revision
+                    else ArticleStatus.TODO.value
+                )
+                self.db.update_article(
+                    article_id,
+                    title=title,
+                    markdown_content=content,
+                    meta_description=meta_description,
+                    slug=slug,
+                    word_count=wc,
+                    status=rollback_status,
+                    writer_claim="",
+                    revision_notes=(article.revision_notes or "")
+                    + f"\n\n[QUILL SELF-CHECK FAIL] {gate_reason}",
+                )
+                return {
+                    "status": "quality_gate_fail",
+                    "article_id": article_id,
+                    "reason": gate_reason,
+                    "word_count": wc,
+                }
+
             # Save and submit to Sage
             self.db.update_article(
                 article_id,
@@ -693,6 +723,34 @@ Format as a clean outline with ## headers and bullet points."""
         )[:160]
 
     # ------------------------------------------------------------------
+    # Quality gate — prevent submission to Sage when content clearly
+    # cannot meet the approval threshold.
+    # ------------------------------------------------------------------
+
+    MIN_WORD_COUNT = 1500
+    MIN_READABILITY = 40
+
+    def _passes_minimum_bar(self, content: str, wc: int) -> tuple[bool, str]:
+        """Check if content meets the minimum bar for Sage review.
+
+        Returns (passes, reason). Articles that fail are held back so
+        Quill can retry rather than wasting a Sage review cycle.
+        """
+        reasons = []
+        if wc < self.MIN_WORD_COUNT:
+            reasons.append(f"Word count {wc} below minimum {self.MIN_WORD_COUNT}")
+
+        report = readability_report(content)
+        if report["flesch_kincaid"] < self.MIN_READABILITY:
+            reasons.append(
+                f"Readability FK {report['flesch_kincaid']} below minimum {self.MIN_READABILITY}"
+            )
+
+        if reasons:
+            return False, "; ".join(reasons)
+        return True, ""
+
+    # ------------------------------------------------------------------
     # Targeted revision (instead of full rewrite)
     # ------------------------------------------------------------------
     def _targeted_revision(
@@ -776,6 +834,25 @@ Format as a clean outline with ## headers and bullet points."""
                 article.suggested_title or article.title or article.target_keyword.title()
             )
             wc = word_count(content)
+
+            # Quality gate — same check as _write_one
+            gate_pass, gate_reason = self._passes_minimum_bar(content, wc)
+            if not gate_pass:
+                logger.warning(
+                    f"Targeted revision of {article.id} failed quality gate: {gate_reason}"
+                )
+                self.db.update_article(
+                    article.id,
+                    markdown_content=content,
+                    meta_description=meta,
+                    slug=slug,
+                    word_count=wc,
+                    status=ArticleStatus.REVISION.value,
+                    writer_claim="",
+                    revision_notes=(article.revision_notes or "")
+                    + f"\n\n[QUILL SELF-CHECK FAIL] {gate_reason}",
+                )
+                return None  # Fall through to full rewrite
 
             self.db.update_article(
                 article.id,
