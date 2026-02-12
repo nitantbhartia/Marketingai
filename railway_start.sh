@@ -1,26 +1,21 @@
 #!/bin/bash
 # Combined startup script for Railway
-# Runs dashboard + worker + api in one service
+# Dashboard is the primary web process bound to $PORT
+# Cron worker runs in background for scheduled monitoring
 
-echo "🚀 Starting ClaimCoach Pipeline Services..."
+set -e
+
+echo "Starting ClaimCoach Pipeline Services..."
 echo ""
 
-# Start cron worker in background
-echo "📅 Starting cron worker (agents scheduler)..."
+# Start cron worker in background (non-critical — OK if it fails)
+echo "Starting cron worker (scheduled monitoring)..."
 python cron_runner.py &
 WORKER_PID=$!
-echo "   ✓ Worker running (PID: $WORKER_PID)"
-
-# Start API server in background
-echo "🔌 Starting API server..."
-python api_server.py &
-API_PID=$!
-echo "   ✓ API running (PID: $API_PID)"
+echo "  Worker started (PID: $WORKER_PID)"
 
 # Start dashboard in foreground (uses $PORT from Railway)
-echo "📊 Starting dashboard on port $PORT..."
+# This is the only process that must bind to $PORT for Railway health checks
+echo "Starting dashboard on port ${PORT:-8000}..."
 echo ""
-python dashboard_server.py --port ${PORT:-8000}
-
-# If dashboard exits, kill background processes
-kill $WORKER_PID $API_PID 2>/dev/null
+exec python dashboard_server.py --port ${PORT:-8000}

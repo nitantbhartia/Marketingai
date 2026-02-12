@@ -5,6 +5,8 @@ Exposes endpoints for all validation checks.
 Called by Sage agent before approving articles for publication.
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -20,11 +22,20 @@ from content_quality.validators.link_checker import check_links
 from content_quality.validators.math_validator import validate_math
 from content_quality.db import init_database
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize database on startup."""
+    init_database()
+    yield
+
+
 # Initialize FastAPI app
 app = FastAPI(
     title="ClaimCoach Content Quality API",
     description="Pre-publish validation gates for content quality and SEO",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Add CORS middleware
@@ -59,13 +70,6 @@ class ValidationResult(BaseModel):
     math: dict
     summary: str
     revision_notes: List[str]
-
-
-# Initialize database on startup
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database on startup."""
-    init_database()
 
 
 # Health check endpoint
@@ -335,6 +339,5 @@ if __name__ == "__main__":
         "api_server:app",
         host=API_HOST,
         port=API_PORT,
-        reload=True,  # Enable auto-reload in development
         log_level="info"
     )
