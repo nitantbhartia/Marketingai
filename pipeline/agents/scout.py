@@ -281,7 +281,7 @@ Keep it concise — this is a brief, not the article."""
 
         return self.call_claude(
             prompt,
-            model=self.default_model,
+            model=self.strategy_model,
             max_tokens=500,
         )
 
@@ -299,6 +299,6 @@ Return ONLY the title, nothing else."""
 
         return self.call_claude(
             prompt,
-            model=self.default_model,
+            model=self.strategy_model,
             max_tokens=60,
         ).strip().strip('"')

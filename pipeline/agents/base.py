@@ -56,13 +56,28 @@ class BaseAgent(ABC):
 
     @property
     def fast_model(self) -> str:
-        """Cheaper/faster model for lightweight tasks (outlines, FAQs, self-review).
+        """Cheaper/faster model for bulk drafting and lightweight tasks.
 
         Always returns the fast tier: Gemini Flash or Claude Haiku.
         """
         if self.provider == "gemini":
             return self.config.gemini.default_model  # flash
         return "claude-haiku-4-5-20251001"
+
+    @property
+    def strategy_model(self) -> str:
+        """Stronger model for high-trust tasks: outlines, briefs, fact checks.
+
+        Returns Gemini Pro or Claude Sonnet — used where E-E-A-T quality
+        matters more than speed.
+        """
+        if self.provider == "gemini":
+            return getattr(
+                self.config.gemini, "strategy_model", "gemini-2.5-pro"
+            )
+        return getattr(
+            self.config.anthropic, "quill_model", "claude-sonnet-4-5-20250929"
+        )
 
     @property
     def has_llm(self) -> bool:

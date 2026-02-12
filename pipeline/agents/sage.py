@@ -372,7 +372,7 @@ Format each issue on its own line starting with "- "."""
 
         result = self.call_claude(
             prompt,
-            model=self.default_model,
+            model=self.strategy_model,
             max_tokens=500,
         )
 
