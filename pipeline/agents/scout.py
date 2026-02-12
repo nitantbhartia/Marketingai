@@ -97,8 +97,9 @@ class ScoutAgent(BaseAgent):
         performance_hints = self._load_performance_hints()
 
         # Phase 3: If LLM is available, generate briefs for top unbriefed topics.
-        # Capped at 3 to stay within Gemini free-tier rate limits (each article = 2 calls).
-        unbriefed = self.db.query_articles(status=ArticleStatus.BACKLOG.value, limit=10)
+        # Capped at 5 per run (each brief = 2 API calls, well within free-tier
+        # 5 RPM when spaced by the global rate_limit_delay).
+        unbriefed = self.db.query_articles(status=ArticleStatus.BACKLOG.value, limit=15)
         if performance_hints:
             # Prioritize articles in high-performing categories
             unbriefed = sorted(
@@ -106,7 +107,7 @@ class ScoutAgent(BaseAgent):
                 key=lambda a: a.content_category in performance_hints.get("preferred", []),
                 reverse=True,
             )
-        max_ai_briefs = 3
+        max_ai_briefs = 5
         briefed = 0
         if self.config.anthropic.api_key or self.config.gemini.api_key:
             for article in unbriefed:
