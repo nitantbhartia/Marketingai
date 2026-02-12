@@ -268,6 +268,44 @@ async def publish_article(article_id: int):
     return {"success": True, "message": "Article queued for publishing"}
 
 
+@app.post("/api/article/{article_id}/retry")
+async def retry_article(article_id: int):
+    """Send a rejected article back to Quill as a revision.
+
+    Preserves the existing content and Sage's review notes so Quill
+    can use the feedback to improve the article rather than starting
+    from scratch.
+    """
+
+    with get_db() as db:
+        cursor = db.execute("SELECT status FROM articles WHERE id = ?", (article_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Article not found")
+
+        # Send to 'revision' (not 'todo') so Quill uses _try_revision()
+        # which includes the existing content + review notes in its prompt.
+        # Reset revision_count so it doesn't immediately hit max rounds.
+        db.execute("""
+            UPDATE articles SET
+                status = 'revision',
+                writer_claim = '',
+                editor_claim = '',
+                revision_count = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (article_id,))
+
+    log_agent_action(
+        agent_name="human_reviewer",
+        action="retried",
+        article_id=article_id,
+        details={"previous_status": row[0]}
+    )
+
+    return {"success": True, "message": "Article sent back for revision — Quill will improve it using Sage's feedback"}
+
+
 @app.post("/api/notifications/article-ready")
 async def notify_article_ready(request: Request):
     """

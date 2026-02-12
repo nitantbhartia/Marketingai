@@ -221,6 +221,28 @@ async function publishNow() {
     }
 }
 
+async function retryArticle() {
+    if (!confirm('Send this article back to Quill for revision? Sage\'s feedback will be used to improve it.')) {
+        return;
+    }
+
+    const button = event.target;
+    showLoading(button);
+
+    try {
+        await apiRequest(
+            `${API_BASE}/api/article/${articleId}/retry`,
+            'POST'
+        );
+
+        showToast('Article sent back for revision', 'success');
+        setTimeout(() => window.location.reload(), 1500);
+    } catch (error) {
+        showToast(`Error retrying article: ${error.message}`, 'error');
+        hideLoading(button);
+    }
+}
+
 // ── Pipeline Control Functions ─────────────────────────────
 
 const PIPELINE_STEPS = ['scout', 'brief-topics', 'promote', 'quill', 'sage'];
