@@ -315,6 +315,9 @@ class Database:
         d = asdict(article)
         # Let SQLite autoincrement handle the id
         d.pop("id", None)
+        # Empty slug must be NULL to satisfy UNIQUE constraint
+        if not d.get("slug"):
+            d["slug"] = None
 
         cols = ", ".join(d.keys())
         placeholders = ", ".join("?" for _ in d)
