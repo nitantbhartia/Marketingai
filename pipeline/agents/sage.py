@@ -122,8 +122,11 @@ class SageAgent(BaseAgent):
 
         content = article.markdown_content or ""
 
-        # 1. Plagiarism check (20 pts) — uses Copyscape if available, else skip
-        plag_score, plag_issues = self._check_plagiarism(content)
+        # 1. Plagiarism check (20 pts) — only on first review, reuse on revisions
+        if article.revision_count > 0:
+            plag_score, plag_issues = self._reuse_plagiarism_score(article)
+        else:
+            plag_score, plag_issues = self._check_plagiarism(content, article)
         scores["plagiarism"] = {"score": plag_score, "max": 20, "issues": plag_issues}
         total_score += plag_score
         all_issues.extend(plag_issues)
@@ -290,15 +293,28 @@ class SageAgent(BaseAgent):
             "scores": scores,
         }
 
-    def _check_plagiarism(self, content: str) -> tuple[float, list[str]]:
-        """Check for plagiarism. Uses Copyscape if configured, else gives full marks."""
-        if not self.config.copyscape.api_key:
-            # No Copyscape configured — give benefit of the doubt but flag
-            return 18.0, ["Plagiarism check skipped (Copyscape not configured)"]
+    def _check_plagiarism(self, content: str, article=None) -> tuple[float, list[str]]:
+        """Check for plagiarism / originality.
 
+        Priority:
+          1. Copyscape API (paid, most reliable) — if configured
+          2. LLM originality review (free, uses Gemini/Claude) — if LLM available
+          3. Skip with 14/20 benefit-of-the-doubt — no check possible
+        """
+        # ── Tier 1: Copyscape (gold standard) ──
+        if self.config.copyscape.api_key:
+            return self._copyscape_check(content)
+
+        # ── Tier 2: LLM-based originality review (free) ──
+        if self.has_llm:
+            return self._llm_originality_check(content, article)
+
+        # ── Tier 3: No check available ──
+        return 14.0, ["Plagiarism check skipped (no Copyscape or LLM configured)"]
+
+    def _copyscape_check(self, content: str) -> tuple[float, list[str]]:
+        """Check plagiarism via Copyscape API."""
         try:
-            import requests
-
             params = {
                 "u": self.config.copyscape.username,
                 "o": self.config.copyscape.api_key,
@@ -318,6 +334,94 @@ class SageAgent(BaseAgent):
         except Exception as e:
             logger.warning(f"Copyscape check failed: {e}")
             return 15.0, [f"Plagiarism check error: {e}"]
+
+    def _llm_originality_check(self, content: str, article=None) -> tuple[float, list[str]]:
+        """Use LLM to assess content originality (free alternative to Copyscape).
+
+        Checks for:
+        - Generic boilerplate that appears on many insurance sites
+        - Lack of specific, original analysis
+        - Templated filler paragraphs
+        - Whether content is meaningfully tailored to the target keyword/state
+        """
+        keyword = getattr(article, "target_keyword", "unknown") if article else "unknown"
+        title = getattr(article, "title", "") if article else ""
+
+        # Send first ~3000 chars to keep token cost low (utility model)
+        excerpt = content[:3000]
+
+        prompt = f"""You are a plagiarism and originality reviewer for insurance content.
+
+Article title: {title}
+Target keyword: {keyword}
+
+Evaluate the following article excerpt for originality. Score it 0-20 based on:
+- 20: Highly original with specific, unique analysis and examples
+- 15-19: Mostly original but has some generic passages
+- 10-14: Contains significant boilerplate or templated content
+- 5-9: Mostly generic content found on many insurance websites
+- 0-4: Appears to be copied or entirely templated
+
+Look for:
+1. Generic boilerplate (e.g. "insurance companies are not on your side" without specifics)
+2. Templated filler paragraphs that could apply to any state/topic
+3. Lack of specific data points, examples, or unique analysis
+4. Whether content is genuinely tailored to "{keyword}" or just superficially mentions it
+
+Respond in EXACTLY this JSON format:
+{{"score": <int 0-20>, "issues": ["issue1", "issue2"]}}
+
+If no issues, use an empty list: {{"score": 20, "issues": []}}
+
+Article excerpt:
+---
+{excerpt}
+---"""
+
+        try:
+            raw = self.call_claude(
+                prompt=prompt,
+                system="You are an originality checker. Respond only with valid JSON.",
+                model=self.utility_model,
+                max_tokens=300,
+            )
+
+            # Parse JSON from response
+            raw = raw.strip()
+            # Handle markdown code blocks
+            if raw.startswith("```"):
+                raw = re.sub(r"^```(?:json)?\s*", "", raw)
+                raw = re.sub(r"\s*```$", "", raw)
+
+            result = json.loads(raw)
+            score = max(0.0, min(20.0, float(result.get("score", 14))))
+            issues = result.get("issues", [])
+            if not isinstance(issues, list):
+                issues = [str(issues)]
+
+            # Prefix issues so reviewers know the source
+            issues = [f"[LLM originality] {i}" for i in issues if i]
+
+            return score, issues
+
+        except Exception as e:
+            logger.warning(f"LLM originality check failed: {e}")
+            return 14.0, [f"Originality check error (LLM): {e}"]
+
+    def _reuse_plagiarism_score(self, article) -> tuple[float, list[str]]:
+        """Reuse plagiarism score from a previous review round.
+
+        Plagiarism doesn't change between revision rounds (content originality
+        is inherent to the first draft), so we parse the previous score from
+        revision_notes instead of re-running the check.
+        """
+        notes = article.revision_notes or ""
+        match = re.search(r"\*\*plagiarism\*\*:\s*([\d.]+)/20", notes)
+        if match:
+            prev_score = min(20.0, max(0.0, float(match.group(1))))
+            return prev_score, [f"Plagiarism score carried from round 1: {prev_score}/20"]
+        # Couldn't parse — give benefit of the doubt
+        return 18.0, ["Plagiarism score reused (prior result not found, defaulting to 18/20)"]
 
     def _check_facts(self, content: str, article) -> tuple[float, list[str]]:
         """Check factual accuracy against product context and state rules."""
