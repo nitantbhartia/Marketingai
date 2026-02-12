@@ -72,7 +72,8 @@ class PipelineSettings:
     blog_output_dir: str = "output/blog"
     min_backlog_topics: int = 15
     articles_per_week_target: int = 4
-    max_revision_rounds: int = 3
+    max_revision_rounds: int = 5
+    approval_score_threshold: int = 90
     dashboard_url: str = ""
 
 
