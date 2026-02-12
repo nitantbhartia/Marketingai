@@ -565,6 +565,21 @@ Format as a clear, actionable brief for a writer."""
         }
 
 
+@app.get("/debug/config")
+async def debug_config():
+    """Debug endpoint to see resolved config and env vars."""
+    import os
+    from pipeline.config import Config
+    cfg = Config.load()
+    return {
+        "llm_provider": cfg.llm_provider,
+        "gemini_api_key_set": bool(cfg.gemini.api_key),
+        "gemini_default_model": cfg.gemini.default_model,
+        "env_LLM_PROVIDER": os.environ.get("LLM_PROVIDER"),
+        "env_GEMINI_API_KEY_set": bool(os.environ.get("GEMINI_API_KEY")),
+    }
+
+
 @app.get("/debug/database")
 async def debug_database():
     """Debug endpoint to see what's in the database."""
