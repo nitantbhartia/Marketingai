@@ -586,12 +586,34 @@ async def debug_articles():
     from content_quality.db import get_db
     with get_db() as db:
         cursor = db.execute("""
+            SELECT status, COUNT(*) as count FROM articles GROUP BY status
+        """)
+        status_counts = {row[0]: row[1] for row in cursor.fetchall()}
+
+        cursor = db.execute("""
             SELECT id, target_keyword, status, writer_claim, editor_claim
             FROM articles
-            WHERE status = 'todo'
-            LIMIT 10
+            WHERE status != 'backlog'
+            LIMIT 20
         """)
-        return {"todo_articles": [dict(row) for row in cursor.fetchall()]}
+        return {
+            "status_counts": status_counts,
+            "non_backlog_articles": [dict(row) for row in cursor.fetchall()],
+        }
+
+
+@app.get("/debug/fix-stuck")
+async def fix_stuck_articles():
+    """Reset stuck in_progress articles back to todo."""
+    from content_quality.db import get_db
+    with get_db() as db:
+        cursor = db.execute("""
+            UPDATE articles
+            SET status = 'todo', writer_claim = ''
+            WHERE status = 'in_progress'
+        """)
+        fixed = cursor.rowcount
+    return {"status": "success", "reset_to_todo": fixed}
 
 
 @app.get("/debug/database")
