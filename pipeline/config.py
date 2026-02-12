@@ -13,8 +13,8 @@ import yaml
 class AnthropicConfig:
     api_key: str = ""
     # Per-agent model assignments (cost-optimized defaults)
-    # Quill (writer): Haiku for cost; upgrade to Sonnet if quality needs improvement
-    quill_model: str = "claude-haiku-4-5-20251001"
+    # Quill (writer): Sonnet for quality long-form content
+    quill_model: str = "claude-sonnet-4-5-20250929"
     # Sage (reviewer): Sonnet for better reasoning on quality checks
     sage_model: str = "claude-sonnet-4-5-20250929"
     # Scout (research): Haiku — structured keyword processing
@@ -31,6 +31,13 @@ class AnthropicConfig:
 class GeminiConfig:
     api_key: str = ""
     default_model: str = "gemini-2.5-flash"
+    # Per-agent model assignments — all Flash for single-tier usage
+    quill_model: str = "gemini-2.5-flash"
+    sage_model: str = "gemini-2.5-flash"
+    scout_model: str = "gemini-2.5-flash"
+    morgan_model: str = "gemini-2.5-flash"
+    herald_model: str = "gemini-2.5-flash"
+    lurker_model: str = "gemini-2.5-flash"
     # Minimum seconds between API calls (free tier = 5 RPM → 12s)
     rate_limit_delay: float = 12.0
 
@@ -100,6 +107,9 @@ class Config:
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     # Which LLM provider to use: "anthropic" or "gemini"
     llm_provider: str = "anthropic"
+    # Per-agent provider overrides: e.g. {"sage": "anthropic"} to use a
+    # different provider for a specific agent. Empty = all use llm_provider.
+    agent_provider_overrides: dict = field(default_factory=dict)
     _base_dir: Path = field(default_factory=lambda: Path.cwd())
 
     @classmethod
@@ -166,6 +176,10 @@ class Config:
         }
         if "llm_provider" in raw:
             self.llm_provider = raw["llm_provider"]
+        if "agent_provider_overrides" in raw and isinstance(
+            raw["agent_provider_overrides"], dict
+        ):
+            self.agent_provider_overrides = raw["agent_provider_overrides"]
         for section_name, section_obj in section_map.items():
             if section_name in raw and isinstance(raw[section_name], dict):
                 for key, value in raw[section_name].items():
