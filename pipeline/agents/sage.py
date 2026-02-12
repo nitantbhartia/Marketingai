@@ -341,7 +341,7 @@ class SageAgent(BaseAgent):
                 score -= 5
 
         # If AI is available, do a deeper fact check
-        if self.config.anthropic.api_key:
+        if self.has_llm:
             try:
                 ai_issues = self._ai_fact_check(content, article)
                 issues.extend(ai_issues)

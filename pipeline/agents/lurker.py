@@ -64,7 +64,7 @@ class LurkerAgent(BaseAgent):
 
         # Draft responses for high-scoring opportunities
         drafted = 0
-        if self.config.anthropic.api_key:
+        if self.has_llm:
             for opp in reddit_opps:
                 if opp.get("score", 0) >= 0.6:
                     draft = self._draft_response(opp)

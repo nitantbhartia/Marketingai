@@ -118,8 +118,8 @@ class HeraldAgent(BaseAgent):
         """Generate social content for an article and post/draft it."""
         results = {"article_id": article.id, "title": article.title, "posts": []}
 
-        # Generate social content using Claude
-        if self.config.anthropic.api_key:
+        # Generate social content using LLM (Anthropic or Gemini)
+        if self.has_llm:
             social_content = self._generate_social_content(article)
         else:
             social_content = self._template_social_content(article)
