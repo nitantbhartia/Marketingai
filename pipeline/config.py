@@ -31,6 +31,19 @@ class AnthropicConfig:
 class GeminiConfig:
     api_key: str = ""
     default_model: str = "gemini-2.5-flash"
+    # Per-agent model assignments (mirrors AnthropicConfig)
+    # Quill (writer): Pro for quality long-form content
+    quill_model: str = "gemini-2.5-pro"
+    # Sage (reviewer): Flash — scoring is structured logic
+    sage_model: str = "gemini-2.5-flash"
+    # Scout (research): Flash — keyword processing
+    scout_model: str = "gemini-2.5-flash"
+    # Morgan (PM): Flash — health checks
+    morgan_model: str = "gemini-2.5-flash"
+    # Herald (social): Flash — short social posts
+    herald_model: str = "gemini-2.5-flash"
+    # Lurker (community): Flash — response drafting
+    lurker_model: str = "gemini-2.5-flash"
     # Minimum seconds between API calls (free tier = 5 RPM → 12s)
     rate_limit_delay: float = 12.0
 

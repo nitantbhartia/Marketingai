@@ -304,7 +304,7 @@ Format as a clean outline with ## headers and bullet points."""
             outline = self.call_claude(
                 prompt=prompt,
                 system="You are a content strategist creating detailed article outlines.",
-                model=self.default_model,
+                model=self.fast_model,
                 max_tokens=1500,
             )
             logger.info(
@@ -501,7 +501,7 @@ Format as a clean outline with ## headers and bullet points."""
                     f"### Question here?\n\nAnswer here.\n\n"
                     f"Make questions real things people search for."
                 ),
-                model=self.default_model,
+                model=self.fast_model,
                 max_tokens=800,
             )
             return result.strip()

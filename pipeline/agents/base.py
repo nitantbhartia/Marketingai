@@ -31,9 +31,30 @@ class BaseAgent(ABC):
 
     @property
     def default_model(self) -> str:
-        """Get this agent's configured model from config."""
+        """Get this agent's configured model, provider-aware.
+
+        When using Gemini, returns the Gemini model for this agent
+        (e.g. gemini-2.5-pro for Quill). When using Anthropic, returns
+        the Anthropic model (e.g. claude-sonnet for Quill).
+        """
         model_attr = f"{self.name}_model"
+        provider = getattr(self.config, "llm_provider", "anthropic")
+        if provider == "gemini":
+            return getattr(
+                self.config.gemini, model_attr, self.config.gemini.default_model
+            )
         return getattr(self.config.anthropic, model_attr, "claude-haiku-4-5-20251001")
+
+    @property
+    def fast_model(self) -> str:
+        """Cheaper/faster model for lightweight tasks (outlines, FAQs, self-review).
+
+        Always returns the fast tier: Gemini Flash or Claude Haiku.
+        """
+        provider = getattr(self.config, "llm_provider", "anthropic")
+        if provider == "gemini":
+            return self.config.gemini.default_model  # flash
+        return "claude-haiku-4-5-20251001"
 
     @abstractmethod
     def run(self) -> dict[str, Any]:
