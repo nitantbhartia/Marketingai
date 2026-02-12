@@ -17,7 +17,7 @@ from typing import Any
 from pipeline.agents.base import BaseAgent
 from pipeline.db import ArticleStatus
 from pipeline.utils.readability import readability_report, word_count
-from pipeline.utils.seo import detect_faq_section, extract_links
+from pipeline.utils.seo import _keyword_match, detect_faq_section, extract_links
 
 logger = logging.getLogger(__name__)
 
@@ -592,9 +592,8 @@ Format as a clean outline with ## headers and bullet points."""
         keyword = article.target_keyword or ""
         keyword_lower = keyword.lower()
 
-        # Check 1: Keyword in first 100 words
-        first_500 = content[:500].lower()
-        if keyword_lower and keyword_lower not in first_500:
+        # Check 1: Keyword in first 100 words (fuzzy match — allows stop words)
+        if keyword_lower and not _keyword_match(keyword, content[:500]):
             # Insert keyword into the first paragraph naturally
             paragraphs = content.split("\n\n", 1)
             if paragraphs:
@@ -661,12 +660,12 @@ Format as a clean outline with ## headers and bullet points."""
             fixes.append("trimmed_meta_description")
         elif len(meta_description) < 130:
             # Too short — try to extend
-            if keyword_lower and keyword_lower not in meta_description.lower():
+            if keyword_lower and not _keyword_match(keyword, meta_description):
                 meta_description += f" Learn about {keyword}."
             fixes.append("extended_meta_description")
 
-        # Check 5: Keyword in meta description
-        if keyword_lower and keyword_lower not in meta_description.lower():
+        # Check 5: Keyword in meta description (fuzzy match)
+        if keyword_lower and not _keyword_match(keyword, meta_description):
             # Prepend keyword context
             meta_description = (
                 f"{keyword.title()}: {meta_description}"

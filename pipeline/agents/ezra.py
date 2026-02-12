@@ -233,9 +233,9 @@ class EzraAgent(BaseAgent):
                 "type": "secondary",
                 "position": "inline",
                 "heading": "Questions About Your Claim?",
-                "text": "Chat with our AI assistant trained on insurance regulations.",
-                "button_text": "Ask a Question",
-                "button_url": "https://claimcoach.app/chat",
+                "text": "Our free tool analyzes your settlement and shows what you may be missing.",
+                "button_text": "Check Your Settlement",
+                "button_url": "https://claimcoach.app",
             })
 
         # Bottom CTA - Newsletter signup
@@ -366,9 +366,13 @@ class EzraAgent(BaseAgent):
 
     @staticmethod
     def _slugify(text: str) -> str:
-        """Convert text to URL-friendly slug."""
+        """Convert text to URL-friendly slug.
+
+        Truncates to 80 chars — aligned with Quill's _generate_slug to
+        prevent slug mismatches that break internal links.
+        """
         text = text.lower()
         text = re.sub(r'[^\w\s-]', '', text)
         text = re.sub(r'[-\s]+', '-', text)
         text = text.strip('-')
-        return text[:50]
+        return text[:80]

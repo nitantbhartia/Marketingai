@@ -183,10 +183,14 @@ class SageAgent(BaseAgent):
             elif valid > 0:
                 link_score = 5
                 link_issues.append(f"{len(internal_links) - valid} internal links point to unpublished articles")
+            elif len(published) <= 3:
+                # Grace period: links exist but nothing is published yet
+                link_score = 8
+                link_issues.append("Internal links present but no published articles to validate against (grace period)")
             else:
                 link_issues.append("Internal links don't match published articles")
         else:
-            # No internal links — not a hard fail if there aren't many published articles yet
+            # No internal links at all
             if len(published) > 3:
                 link_issues.append("No internal links (published articles available)")
             else:
@@ -358,6 +362,12 @@ class SageAgent(BaseAgent):
                 score -= len(ai_issues) * 2
             except Exception as e:
                 logger.warning(f"AI fact check failed: {e}")
+        else:
+            # Without AI verification, cap at 10/20 to reflect the uncertainty.
+            # Regex patterns only catch known-bad claims; real factual errors
+            # (wrong thresholds, incorrect dollar amounts) require AI.
+            score = min(score, 10.0)
+            issues.append("Factual accuracy capped at 10/20 (no LLM configured for deep check)")
 
         return max(0, score), issues
 
