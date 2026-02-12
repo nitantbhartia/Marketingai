@@ -131,11 +131,12 @@ def count_broken_links(links_result):
 
 def approve_article(article_id, validation_result):
     """Approve article for publishing."""
-    # Update status to ready_to_publish
+    # Update status to ready_to_publish and release editor claim
     with get_db() as db:
         db.execute("""
             UPDATE articles SET
                 status = 'ready_to_publish',
+                editor_claim = '',
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (article_id,))
@@ -168,13 +169,15 @@ def request_revision(article_id, article, validation_result):
     # Format revision notes
     revision_notes = format_revision_notes(validation_result['revision_notes'])
 
-    # Update database
+    # Update database — release both claims so Quill can pick it up
     with get_db() as db:
         db.execute("""
             UPDATE articles SET
                 status = 'revision',
                 revision_notes = ?,
                 revision_count = revision_count + 1,
+                writer_claim = '',
+                editor_claim = '',
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (revision_notes, article_id))

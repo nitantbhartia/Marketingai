@@ -230,7 +230,8 @@ async def reject_article(article_id: int, reason: str = Form(...)):
                 status = 'revision',
                 revision_notes = ?,
                 revision_count = revision_count + 1,
-                editor_claim = NULL,
+                writer_claim = '',
+                editor_claim = '',
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (new_notes, article_id))
@@ -250,11 +251,13 @@ async def reject_article(article_id: int, reason: str = Form(...)):
 async def publish_article(article_id: int):
     """Manually trigger publishing for an article."""
 
-    # Just update status - Ezra will pick it up
+    # Clear stale claims and update status - Ezra will pick it up
     with get_db() as db:
         db.execute("""
             UPDATE articles SET
                 status = 'ready_to_publish',
+                writer_claim = '',
+                editor_claim = '',
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (article_id,))
