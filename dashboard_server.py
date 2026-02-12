@@ -601,6 +601,8 @@ async def debug_database():
         "sample_articles": sample_articles
     }
 
+
+if __name__ == "__main__":
     import argparse
     import os
     import uvicorn
