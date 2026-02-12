@@ -213,25 +213,24 @@ class SageAgent(BaseAgent):
         total_score += legal_score
         all_issues.extend(legal_issues)
 
-        # Decision
+        # Decision — all non-passing articles enter the revision loop so
+        # Quill can automatically improve them using Sage's feedback.
+        # Articles are only rejected when max revision rounds are exhausted.
         total_score = round(total_score, 1)
         if total_score >= 90:
             decision = "approved"
             new_status = ArticleStatus.READY_TO_PUBLISH.value
-        elif total_score >= 70:
-            decision = "revision"
-            new_status = ArticleStatus.REVISION.value
-        else:
+        elif article.revision_count >= self.config.pipeline.max_revision_rounds:
             decision = "rejected"
             new_status = ArticleStatus.REJECTED.value
+        else:
+            decision = "revision"
+            new_status = ArticleStatus.REVISION.value
 
         # Format revision notes
         revision_notes = self._format_review(scores, total_score, decision, all_issues)
 
-        # Check max revision rounds
-        if decision == "revision" and article.revision_count >= self.config.pipeline.max_revision_rounds:
-            decision = "rejected"
-            new_status = ArticleStatus.REJECTED.value
+        if decision == "rejected":
             revision_notes += "\n\n[REJECTED: Maximum revision rounds exceeded]"
 
         # Update article
@@ -252,9 +251,8 @@ class SageAgent(BaseAgent):
 
         self.db.update_article(article.id, **update_kwargs)
 
-        # Notify dashboard if ready for review/approval
-        if decision in ["approved", "revision"]:
-            self._notify_dashboard(article.id, decision, total_score)
+        # Notify dashboard
+        self._notify_dashboard(article.id, decision, total_score)
 
         logger.info(
             f"Article {article.id} ({article.title}): "
