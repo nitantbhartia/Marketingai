@@ -251,18 +251,26 @@ class BaseAgent(ABC):
         system: str = "",
         model: str | None = None,
         max_tokens: int = 4096,
+        temperature: float | None = None,
     ) -> str:
         """Call LLM API (Anthropic or Gemini) and return the text response.
 
         Respects per-agent provider overrides — e.g. Sage uses Anthropic
         Sonnet for reviews even when the global provider is Gemini.
+
+        Args:
+            temperature: Sampling temperature (0.0-2.0). Higher values make
+                output more creative/varied. For SEO writing that feels human,
+                use 0.8-0.9. For structured/analytical tasks, use 0.2-0.4.
+                None uses the provider's default.
         """
         if self.provider == "gemini":
-            return self._call_gemini(prompt, system, model, max_tokens)
-        return self._call_anthropic(prompt, system, model, max_tokens)
+            return self._call_gemini(prompt, system, model, max_tokens, temperature)
+        return self._call_anthropic(prompt, system, model, max_tokens, temperature)
 
     def _call_anthropic(
-        self, prompt: str, system: str, model: str | None, max_tokens: int
+        self, prompt: str, system: str, model: str | None, max_tokens: int,
+        temperature: float | None = None,
     ) -> str:
         import anthropic
 
@@ -277,6 +285,8 @@ class BaseAgent(ABC):
         }
         if system:
             kwargs["system"] = system
+        if temperature is not None:
+            kwargs["temperature"] = temperature
 
         self.logger.debug(f"Calling Claude ({model}), prompt length={len(prompt)}")
         response = client.messages.create(**kwargs)
@@ -285,7 +295,8 @@ class BaseAgent(ABC):
         return text
 
     def _call_gemini(
-        self, prompt: str, system: str, model: str | None, max_tokens: int
+        self, prompt: str, system: str, model: str | None, max_tokens: int,
+        temperature: float | None = None,
     ) -> str:
         global _gemini_last_call
         import json
@@ -334,9 +345,12 @@ class BaseAgent(ABC):
             f"{model_name}:generateContent?key={api_key}"
         )
 
+        gen_config: dict[str, Any] = {"maxOutputTokens": max_tokens}
+        if temperature is not None:
+            gen_config["temperature"] = temperature
         body: dict[str, Any] = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": max_tokens},
+            "generationConfig": gen_config,
         }
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}

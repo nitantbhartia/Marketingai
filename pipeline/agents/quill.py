@@ -22,52 +22,104 @@ from pipeline.utils.seo import _keyword_match, detect_faq_section, extract_links
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# System prompt — the core writing voice
+# Golden System Prompt — Role-Based Constraint Prompting
+# Suppresses AI-isms and forces "High-Agency, Low-Fluff" tone for insurance
+# content that reads like it was written by a senior claims adjuster.
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """You are writing content for ClaimCoach, an AI-powered tool that helps car owners
-fight lowball insurance settlement offers.
+SYSTEM_PROMPT = """### Role
+You are the Lead Content Strategist and Senior Insurance Adjuster for ClaimCoach (claimcoach.app).
+Your goal is to write SEO-optimized, authoritative, and deeply empathetic guides that help
+car owners navigate the nightmare of lowball total loss insurance settlements.
 
-VOICE & TONE:
-- Authoritative but empathetic — you understand how stressful this is
-- Adversarial toward insurance companies, NOT toward the reader
-- Use "you" and "your" — speak directly to someone going through this
-- Never condescending. These are smart people in an unfamiliar situation.
-- Avoid jargon unless defining it. If you use a term like "diminished value," explain it.
-- Write like a knowledgeable friend, not a textbook.
+### Tone & Style Guidelines (The "Human" Filter)
+1. NO AI-ISMS: Never use these words: delve, tapestry, pivotal, unlock, landscape, comprehensive,
+   utilize, leverage, embark, foster, streamline, robust, cutting-edge, paradigm, synergy,
+   game-changer, deep dive, at the end of the day, it's important to note, in today's world.
+2. VARY SENTENCE RHYTHM: Mix short, punchy sentences (3-7 words) with longer, explanatory ones.
+   If a sentence is over 20 words, the next must be under 10. This creates a natural cadence.
+3. EMPATHETIC COACHING: Use "you" and "we." Acknowledge the stress. Don't lecture; coach.
+   Write like a knowledgeable friend who happens to be a former adjuster.
+4. JARGON HANDLING: Use technical terms (e.g., "Actual Cash Value," "Subrogation," "Bad Faith")
+   but explain them instantly in plain English as if talking to a friend over coffee.
+5. NO WRAPPED SUMMARIES: Do not start sections with "In conclusion" or "To summarize."
+   End with a clear, actionable "Next Step."
+6. ACTIVE VOICE ONLY: "The adjuster denied the claim" not "The claim was denied by the adjuster."
+7. SHORT WORDS: "Get" not "obtain." "Show" not "demonstrate." "Use" not "utilize." "Help" not "facilitate."
 
-STRUCTURE:
-- 1800–2200 words
-- Keyword in first 100 words — naturally, not forced
-- H2 headers every 200–300 words
+### Structural Requirements
+- Use "Adjuster Insider" Callouts: Use Markdown blockquotes (> ) for tips that a standard
+  insurance company wouldn't want a policyholder to know. Prefix with **Adjuster Insider:**
+  Example: > **Adjuster Insider:** Most adjusters have authority to increase offers by 10-15%
+  without supervisor approval. They just won't tell you that.
+- Entity-First SEO: Naturally weave in primary entities (Policy Limits, Declarations Page,
+  Replacement Cost, Actual Cash Value) within the first 100 words.
+- "Why This Matters to Your Wallet": For every technical fact, add one sentence explaining
+  the dollar impact. Don't just say what something is — say what it costs the reader.
+- 1800-2200 words, H2 headers every 200-300 words
 - At least one actionable takeaway per section
-- FAQ section with 3–5 questions (use ### for each question for schema markup)
+- FAQ section with 3-5 questions (use ### for each question for schema markup)
 - Include specific dollar amounts, ranges, and real data where possible
 - End with clear CTA pointing to ClaimCoach
 
-SEO REQUIREMENTS:
+### SEO Requirements
 - Target keyword in: title, first paragraph, at least 2 H2s, meta description
-- 2–3 external links to authoritative sources (state DOI websites, NAIC, etc.)
-- Meta description: 150–160 chars, includes keyword and emotional hook
+- 2-3 external links to authoritative sources (state DOI websites, NAIC, etc.)
+- Meta description: 150-160 chars, includes keyword and emotional hook
 
-READABILITY:
+### Readability
 - Flesch-Kincaid: 60+ (8th grade level)
 - Sentences: max 25 words average
 - Paragraphs: max 4 sentences
-- Use short words. "Get" not "obtain." "Show" not "demonstrate."
-- Mix sentence lengths — some punchy, some explanatory.
+- Mix sentence lengths — some punchy, some explanatory
 
-FORMAT:
+### Format
 - Output the article in Markdown format
 - Use ## for H2 headers, ### for H3
 - Use [link text](URL) for links
+- Use > for Adjuster Insider callouts
 - At the very end, output a line: META_DESCRIPTION: <your 150-160 char meta description>
 
-CRITICAL RULES:
+### Critical Rules
 - Never claim ClaimCoach can negotiate on your behalf (it can't — legal risk)
 - Never promise specific dollar amounts ClaimCoach will recover
 - Never give legal advice. Say "consider consulting an attorney" for complex situations.
 - Never claim features ClaimCoach doesn't have
 """
+
+# ---------------------------------------------------------------------------
+# Banned AI-ism words — deterministic filter applied in self-review
+# ---------------------------------------------------------------------------
+AI_ISMS = [
+    "delve", "tapestry", "pivotal", "unlock", "landscape", "utilize",
+    "leverage", "embark", "foster", "streamline", "robust", "cutting-edge",
+    "paradigm", "synergy", "game-changer", "deep dive",
+    "at the end of the day", "it's important to note", "in today's world",
+    "it is worth noting", "in this article we will", "without further ado",
+    "in the realm of", "navigating the complexities",
+]
+
+# Simple replacements for common AI-isms
+AI_ISM_REPLACEMENTS: dict[str, str] = {
+    "utilize": "use",
+    "leverage": "use",
+    "comprehensive": "full",
+    "robust": "strong",
+    "streamline": "simplify",
+    "facilitate": "help",
+    "implement": "set up",
+    "subsequently": "then",
+    "furthermore": "also",
+    "additionally": "also",
+    "demonstrate": "show",
+    "obtain": "get",
+    "commence": "start",
+    "endeavor": "try",
+    "ascertain": "find out",
+    "in order to": "to",
+    "due to the fact that": "because",
+    "at this point in time": "now",
+    "prior to": "before",
+}
 
 # ---------------------------------------------------------------------------
 # Category-specific writing strategies
@@ -488,6 +540,7 @@ Format as a clean outline with ## headers and bullet points."""
                 system=self._build_system_prompt(article.content_category),
                 model=self.fast_model,
                 max_tokens=8192,
+                temperature=0.85,  # Human-feel temperature for creative writing
             )
 
         # ── Section-by-section drafting ──
@@ -502,6 +555,9 @@ Format as a clean outline with ## headers and bullet points."""
             context_block += f"=== INTERNAL LINKS ===\n{internal_links}\n\n"
         if lessons:
             context_block += f"=== PAST LESSONS ===\n{lessons}\n\n"
+
+        # Extract friction points from the content brief for variable injection
+        friction_points = self._extract_friction_points(article)
 
         drafted_sections: list[str] = []
         keyword = article.target_keyword
@@ -519,12 +575,15 @@ Format as a clean outline with ## headers and bullet points."""
             if is_first:
                 section_prompt += (
                     "This is the OPENING section. Include the keyword naturally in "
-                    "the first 100 words. Open with empathy and a strong hook.\n"
+                    "the first 100 words. Weave in primary entities (Actual Cash Value, "
+                    "Policy Limits, Replacement Cost) in the opening. "
+                    "Open with empathy and a strong hook.\n"
                 )
             if is_last:
                 section_prompt += (
-                    "This is the CLOSING section. End with a clear CTA pointing to "
-                    "ClaimCoach (claimcoach.app). After the section, output:\n"
+                    "This is the CLOSING section. Do NOT start with 'In conclusion' or "
+                    "'To summarize.' End with a clear actionable Next Step and CTA "
+                    "pointing to ClaimCoach (claimcoach.app). After the section, output:\n"
                     "META_DESCRIPTION: <150-160 character meta description>\n"
                 )
             if not is_first:
@@ -532,9 +591,21 @@ Format as a clean outline with ## headers and bullet points."""
                     f"\n=== PREVIOUSLY WRITTEN (for continuity) ===\n"
                     f"{drafted_sections[-1][-500:]}\n\n"
                 )
+
+            # Inject friction point for the middle sections (where frustration lives)
+            if friction_points and 1 <= i <= len(sections) - 2:
+                fp_index = (i - 1) % len(friction_points)
+                section_prompt += (
+                    f"\n=== FRICTION POINT (weave this insider knowledge into the section) ===\n"
+                    f"{friction_points[fp_index]}\n\n"
+                )
+
             section_prompt += (
                 f"Write ONLY this section (heading + 200-350 words). "
-                f"Use ## for the H2 heading. Output Markdown only."
+                f"Use ## for the H2 heading. Output Markdown only.\n"
+                f"Include at least one > **Adjuster Insider:** blockquote callout with "
+                f"a tip that insurance companies don't want policyholders to know.\n"
+                f"For every technical fact, add a 'Why this matters to your wallet' sentence."
             )
 
             section_text = self.call_claude(
@@ -542,6 +613,7 @@ Format as a clean outline with ## headers and bullet points."""
                 system=system,
                 model=self.fast_model,
                 max_tokens=1500,
+                temperature=0.85,  # Human-feel temperature for creative writing
             )
             drafted_sections.append(section_text.strip())
             logger.debug(
@@ -835,6 +907,32 @@ Article:
             )[:160]
             fixes.append("added_keyword_to_meta")
 
+        # Check 6: AI-isms filter — deterministic find-and-replace for
+        # banned words that make content sound robotic/AI-generated
+        ai_ism_count = 0
+        for old_word, new_word in AI_ISM_REPLACEMENTS.items():
+            pattern = re.compile(re.escape(old_word), re.IGNORECASE)
+            new_content = pattern.sub(new_word, content)
+            if new_content != content:
+                ai_ism_count += 1
+                content = new_content
+        # Also strip multi-word AI-isms that have no simple replacement
+        for phrase in AI_ISMS:
+            if phrase.lower() in content.lower():
+                # Remove the phrase while keeping surrounding sentence structure
+                pattern = re.compile(
+                    r",?\s*" + re.escape(phrase) + r"\s*,?\s*",
+                    re.IGNORECASE,
+                )
+                cleaned = pattern.sub(" ", content)
+                if cleaned != content:
+                    ai_ism_count += 1
+                    content = cleaned
+        if ai_ism_count > 0:
+            # Clean up any double spaces left by removals
+            content = re.sub(r"  +", " ", content)
+            fixes.append(f"removed_{ai_ism_count}_ai_isms")
+
         if fixes:
             logger.info(f"Self-review applied {len(fixes)} fixes: {fixes}")
 
@@ -1072,6 +1170,58 @@ Article:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    @staticmethod
+    def _extract_friction_points(article) -> list[str]:
+        """Extract friction points from the content brief for variable injection.
+
+        Friction points are insider insights that adjusters use against
+        policyholders. Injecting these into section prompts forces the
+        model to include specific, non-generic knowledge.
+
+        Parses bullet points from the brief, or generates generic friction
+        points based on the article's category and keyword.
+        """
+        brief = article.content_brief or ""
+        keyword = article.target_keyword or ""
+        category = article.content_category or ""
+
+        # Try to extract bullet points from the AI-generated brief
+        points = []
+        for line in brief.split("\n"):
+            line = line.strip()
+            if line.startswith("- ") and len(line) > 20:
+                points.append(line[2:])
+            elif line.startswith("* ") and len(line) > 20:
+                points.append(line[2:])
+
+        if points:
+            return points[:5]
+
+        # Fallback: category-specific friction points
+        category_friction: dict[str, list[str]] = {
+            "problem_aware": [
+                f"Adjusters often use automated valuation tools that systematically undervalue vehicles by 10-20% for '{keyword}' cases.",
+                "Insurance companies know most people accept the first offer. Only 5-10% of policyholders ever push back.",
+            ],
+            "solution_aware": [
+                f"When dealing with '{keyword}', adjusters have internal authority to increase offers by 10-15% without supervisor approval — they just won't volunteer this.",
+                "Most policyholders don't know they can invoke the appraisal clause — a binding process that takes the decision out of the adjuster's hands entirely.",
+            ],
+            "state_specific": [
+                f"State regulations on '{keyword}' often have specific deadlines that insurance companies hope you'll miss.",
+                "Filing a DOI complaint triggers an automatic review — adjusters know this and often settle quickly once they see the complaint number.",
+            ],
+            "vehicle_specific": [
+                f"For '{keyword}', insurers often exclude aftermarket modifications, low-mileage bonuses, and regional price variations from their valuations.",
+                "CCC ONE valuations (used by most insurers) are known to pull comparables from different markets to lower your vehicle's value.",
+            ],
+        }
+
+        return category_friction.get(category, [
+            f"Adjusters processing '{keyword}' claims often cite 'company policy' to deny legitimate line items — but company policy is not law.",
+            "Most total loss settlements are initially 15-25% below fair market value. The insurance company is counting on you not knowing this.",
+        ])
+
     def _try_revision(self) -> int | None:
         """Try to pick up an article in revision status."""
         articles = self.db.query_articles(
