@@ -37,6 +37,9 @@ class HeraldAgent(BaseAgent):
 
     def run(self) -> dict[str, Any]:
         """Promote published articles that haven't been amplified yet."""
+        # Learn from past social engagement before generating new content
+        self._learn_from_engagement()
+
         # Find articles that are done but not yet amplified
         done_articles = self.db.query_articles(
             status=ArticleStatus.DONE.value, limit=20
@@ -61,6 +64,55 @@ class HeraldAgent(BaseAgent):
         self.db.record_metric("herald_run", len(promoted))
         logger.info(f"Herald promoted {len(promoted)} articles")
         return {"status": "success", "promoted": len(promoted), "details": promoted}
+
+    def _learn_from_engagement(self) -> None:
+        """Analyze past social posts to learn what gets engagement.
+
+        Checks the social_posts table for posts with engagement data and
+        records lessons about which platforms and content categories work.
+        """
+        # Get all amplified articles to correlate content category with platform engagement
+        amplified = self.db.query_articles(status=ArticleStatus.AMPLIFIED.value, limit=100)
+
+        platform_engagement: dict[str, list[int]] = {}
+        category_engagement: dict[str, list[int]] = {}
+
+        for article in amplified:
+            posts = self.db.get_social_posts_for_article(str(article.id))
+            for post in posts:
+                if post.engagement_count > 0:
+                    platform_engagement.setdefault(post.platform, []).append(
+                        post.engagement_count
+                    )
+                    cat = article.content_category or "general"
+                    category_engagement.setdefault(
+                        f"{post.platform}:{cat}", []
+                    ).append(post.engagement_count)
+
+        # Record platform lessons
+        if platform_engagement:
+            best_platform = max(
+                platform_engagement,
+                key=lambda p: sum(platform_engagement[p]) / len(platform_engagement[p]),
+            )
+            avg_eng = sum(platform_engagement[best_platform]) / len(
+                platform_engagement[best_platform]
+            )
+            self.record_lesson(
+                "herald", "best_platform",
+                f"'{best_platform}' gets highest engagement (avg {avg_eng:.0f})",
+            )
+
+        # Record category+platform combos
+        if category_engagement:
+            best_combo = max(
+                category_engagement,
+                key=lambda c: sum(category_engagement[c]) / len(category_engagement[c]),
+            )
+            self.record_lesson(
+                "herald", "best_combo",
+                f"'{best_combo}' combo gets best social engagement",
+            )
 
     def _promote_article(self, article) -> dict:
         """Generate social content for an article and post/draft it."""
@@ -91,6 +143,15 @@ class HeraldAgent(BaseAgent):
 
     def _generate_social_content(self, article) -> dict:
         """Use Claude to generate platform-specific social content."""
+        # Load engagement lessons to guide generation
+        lessons = self.get_lessons_for_me()
+        lesson_section = ""
+        if lessons:
+            lesson_section = "\n\nInsights from past social performance:\n"
+            for lesson in lessons[:5]:
+                lesson_section += f"- {lesson.lesson}\n"
+            lesson_section += "Use these insights to optimize your posts.\n"
+
         prompt = f"""Generate social media posts to promote this article. The tone should be
 genuinely helpful, never spammy. We're sharing a useful resource, not selling.
 
@@ -98,7 +159,7 @@ Article Title: {article.title}
 Article URL: {article.published_url}
 Keyword: {article.target_keyword}
 Summary (first 500 chars): {article.markdown_content[:500]}
-
+{lesson_section}
 Generate posts for:
 
 1. REDDIT: Write a helpful comment that could be posted on r/insurance or r/personalfinance.

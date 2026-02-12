@@ -53,6 +53,9 @@ class LurkerAgent(BaseAgent):
 
     def run(self) -> dict[str, Any]:
         """Search for engagement opportunities across platforms."""
+        # Learn from past opportunity outcomes before searching
+        self._learn_from_outcomes()
+
         opportunities_found = 0
 
         # Search Reddit
@@ -94,6 +97,39 @@ class LurkerAgent(BaseAgent):
             "opportunities": opportunities_found,
             "drafted": drafted,
         }
+
+    def _learn_from_outcomes(self) -> None:
+        """Analyze which past opportunities got approved vs. skipped.
+
+        Records lessons about which subreddits and thread characteristics
+        yield responses that humans actually approve and post.
+        """
+        all_opps = self.db.query_opportunities(limit=200)
+        if len(all_opps) < 10:
+            return
+
+        # Approval rate by subreddit
+        sub_stats: dict[str, dict[str, int]] = {}
+        for opp in all_opps:
+            sub = opp.subreddit or "unknown"
+            sub_stats.setdefault(sub, {"approved": 0, "total": 0})
+            sub_stats[sub]["total"] += 1
+            if opp.status in ("approved", "posted"):
+                sub_stats[sub]["approved"] += 1
+
+        for sub, stats in sub_stats.items():
+            if stats["total"] >= 3:
+                rate = stats["approved"] / stats["total"]
+                if rate >= 0.5:
+                    self.record_lesson(
+                        "lurker", "high_approval_subreddit",
+                        f"r/{sub} ({rate:.0%} approval rate, n={stats['total']})",
+                    )
+                elif rate <= 0.2 and stats["total"] >= 5:
+                    self.record_lesson(
+                        "lurker", "low_approval_subreddit",
+                        f"r/{sub} ({rate:.0%} approval rate — consider deprioritizing)",
+                    )
 
     def _search_reddit(self) -> list[dict]:
         """Search Reddit for relevant threads."""
@@ -160,7 +196,10 @@ class LurkerAgent(BaseAgent):
         return posts
 
     def _score_opportunity(self, post: dict, subreddit: str) -> dict:
-        """Score an opportunity for relevance and engagement potential."""
+        """Score an opportunity for relevance and engagement potential.
+
+        Uses learned subreddit approval rates to boost/penalize scores.
+        """
         score = 0.0
         title_lower = (post.get("title", "") + " " + post.get("selftext", "")).lower()
 
@@ -210,8 +249,19 @@ class LurkerAgent(BaseAgent):
             except (ValueError, TypeError):
                 pass
 
+        # Learned subreddit bonus/penalty
+        high_subs = self.get_lessons_for_me(category="high_approval_subreddit")
+        low_subs = self.get_lessons_for_me(category="low_approval_subreddit")
+        high_sub_names = {l.lesson.split("(")[0].strip() for l in high_subs}
+        low_sub_names = {l.lesson.split("(")[0].strip() for l in low_subs}
+
+        if f"r/{subreddit}" in high_sub_names:
+            score += 0.1  # Boost subreddits with high approval history
+        elif f"r/{subreddit}" in low_sub_names:
+            score -= 0.1  # Penalize subreddits that rarely get approved
+
         # Cap at 1.0
-        score = min(1.0, round(score, 2))
+        score = min(1.0, max(0.0, round(score, 2)))
 
         post["score"] = score
         return post
@@ -231,13 +281,21 @@ class LurkerAgent(BaseAgent):
                 url = a.published_url or f"https://claimcoach.app/blog/{a.slug}"
                 articles_context += f"- [{a.title}]({url})\n"
 
+        # Load engagement lessons to guide response style
+        lessons = self.get_lessons_for_me()
+        lesson_section = ""
+        if lessons:
+            lesson_section = "\n\nLessons from past responses:\n"
+            for lesson in lessons[:4]:
+                lesson_section += f"- {lesson.lesson}\n"
+
         prompt = f"""Draft a helpful Reddit response to this thread. Be genuinely useful —
 not promotional. Share real advice and only mention the article if it's truly relevant.
 
 Thread title: {opportunity.get('title', '')}
 Subreddit: r/{opportunity.get('subreddit', '')}
 Thread content: {opportunity.get('selftext', '')[:500]}
-{articles_context}
+{articles_context}{lesson_section}
 
 Rules:
 - Sound like a real person who's been through a similar situation
