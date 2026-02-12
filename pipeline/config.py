@@ -31,18 +31,12 @@ class AnthropicConfig:
 class GeminiConfig:
     api_key: str = ""
     default_model: str = "gemini-2.5-flash"
-    # Per-agent model assignments (mirrors AnthropicConfig)
-    # Quill (writer): Pro for quality long-form content
-    quill_model: str = "gemini-2.5-pro"
-    # Sage (reviewer): Flash — scoring is structured logic
+    # Per-agent model assignments — all Flash for single-tier usage
+    quill_model: str = "gemini-2.5-flash"
     sage_model: str = "gemini-2.5-flash"
-    # Scout (research): Flash — keyword processing
     scout_model: str = "gemini-2.5-flash"
-    # Morgan (PM): Flash — health checks
     morgan_model: str = "gemini-2.5-flash"
-    # Herald (social): Flash — short social posts
     herald_model: str = "gemini-2.5-flash"
-    # Lurker (community): Flash — response drafting
     lurker_model: str = "gemini-2.5-flash"
     # Minimum seconds between API calls (free tier = 5 RPM → 12s)
     rate_limit_delay: float = 12.0
@@ -113,11 +107,9 @@ class Config:
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     # Which LLM provider to use: "anthropic" or "gemini"
     llm_provider: str = "anthropic"
-    # Per-agent provider overrides: e.g. {"sage": "anthropic"} uses Sonnet
-    # for Sage reviews even when the global provider is Gemini.
-    agent_provider_overrides: dict = field(
-        default_factory=lambda: {"sage": "anthropic"}
-    )
+    # Per-agent provider overrides: e.g. {"sage": "anthropic"} to use a
+    # different provider for a specific agent. Empty = all use llm_provider.
+    agent_provider_overrides: dict = field(default_factory=dict)
     _base_dir: Path = field(default_factory=lambda: Path.cwd())
 
     @classmethod
