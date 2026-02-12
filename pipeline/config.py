@@ -171,6 +171,14 @@ class Config:
             os.environ.get("LLM_PROVIDER") or cfg.llm_provider
         )
 
+        # Auto-detect provider when not explicitly set: if only one key
+        # is configured, use that provider instead of defaulting to Anthropic.
+        if not os.environ.get("LLM_PROVIDER"):
+            if not cfg.anthropic.api_key and cfg.gemini.api_key:
+                cfg.llm_provider = "gemini"
+            elif cfg.anthropic.api_key and not cfg.gemini.api_key:
+                cfg.llm_provider = "anthropic"
+
         return cfg
 
     def _apply_dict(self, raw: dict) -> None:

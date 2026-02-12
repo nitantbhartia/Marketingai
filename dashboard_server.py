@@ -663,12 +663,25 @@ async def debug_config():
     """Debug endpoint to see resolved config and env vars."""
     import os
     from pipeline.config import Config
+    from pipeline.db import Database
+
     cfg = Config.load()
+    db = Database(cfg.resolve_path(cfg.pipeline.database_path))
+
+    # Check has_llm the same way agents do
+    has_llm = bool(cfg.anthropic.api_key or cfg.gemini.api_key)
+
     return {
         "llm_provider": cfg.llm_provider,
+        "has_llm": has_llm,
+        "anthropic_api_key_set": bool(cfg.anthropic.api_key),
         "gemini_api_key_set": bool(cfg.gemini.api_key),
         "gemini_default_model": cfg.gemini.default_model,
+        "approval_threshold": cfg.pipeline.approval_score_threshold,
+        "max_revision_rounds": cfg.pipeline.max_revision_rounds,
+        "fact_check_mode": "ai_deep_check" if has_llm else "regex_only_capped_10",
         "env_LLM_PROVIDER": os.environ.get("LLM_PROVIDER"),
+        "env_ANTHROPIC_API_KEY_set": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "env_GEMINI_API_KEY_set": bool(os.environ.get("GEMINI_API_KEY")),
     }
 
