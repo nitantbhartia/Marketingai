@@ -89,7 +89,8 @@ class BaseAgent(ABC):
         """Call Claude API and return the text response."""
         import anthropic
 
-        client = anthropic.Anthropic(api_key=self.config.anthropic.api_key)
+        api_key = self.config.anthropic.api_key or None  # None lets SDK use env var
+        client = anthropic.Anthropic(api_key=api_key)
         model = model or self.default_model
 
         kwargs: dict[str, Any] = {
