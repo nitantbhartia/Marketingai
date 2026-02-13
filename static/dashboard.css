@@ -1170,3 +1170,268 @@ body {
         transform: rotate(360deg);
     }
 }
+
+/* ── Lifecycle Pipeline (Dashboard) ─────────────────────── */
+
+.lifecycle-pipeline {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: 1.5rem 2rem;
+    box-shadow: var(--shadow);
+    margin-bottom: 2rem;
+}
+
+.lifecycle-stages {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0;
+    margin-bottom: 1rem;
+}
+
+.lifecycle-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    flex: 1;
+}
+
+.lifecycle-count {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--gray-900);
+}
+
+.lifecycle-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.lifecycle-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-top: 0.25rem;
+}
+
+.lifecycle-dot-backlog { background: var(--gray-300); }
+.lifecycle-dot-todo { background: var(--gray-400); }
+.lifecycle-dot-writing { background: #8b5cf6; }
+.lifecycle-dot-review { background: var(--primary); }
+.lifecycle-dot-approved { background: var(--success); }
+.lifecycle-dot-published { background: #059669; }
+.lifecycle-dot-amplified { background: #0891b2; }
+
+.lifecycle-arrow {
+    color: var(--gray-300);
+    font-size: 1.25rem;
+    flex-shrink: 0;
+    padding: 0 0.25rem;
+}
+
+.lifecycle-sidebar-counts {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.lifecycle-side-badge {
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius);
+}
+
+.lifecycle-side-revision {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.lifecycle-side-rejected {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.lifecycle-total {
+    font-size: 0.8rem;
+    color: var(--gray-500);
+}
+
+@media (max-width: 700px) {
+    .lifecycle-stages {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    .lifecycle-arrow {
+        display: none;
+    }
+    .lifecycle-stage {
+        min-width: 60px;
+    }
+}
+
+/* ── Lifecycle Tracker (Article Detail) ─────────────────── */
+
+.lifecycle-tracker {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--gray-200);
+    flex-wrap: wrap;
+}
+
+.tracker-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.tracker-dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    border: 2px solid var(--gray-300);
+    background: white;
+    color: var(--gray-400);
+}
+
+.tracker-done .tracker-dot {
+    background: var(--success);
+    border-color: var(--success);
+    color: white;
+}
+
+.tracker-current .tracker-dot {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+}
+
+.tracker-label {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--gray-400);
+    text-transform: uppercase;
+}
+
+.tracker-done .tracker-label {
+    color: var(--success);
+}
+
+.tracker-current .tracker-label {
+    color: var(--primary);
+    font-weight: 700;
+}
+
+.tracker-line {
+    flex: 1;
+    height: 2px;
+    background: var(--gray-200);
+    min-width: 20px;
+    margin: 0 0.25rem;
+    margin-bottom: 1.25rem;
+}
+
+.tracker-line-done {
+    background: var(--success);
+}
+
+.tracker-branch {
+    margin-left: 1rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--warning);
+    padding: 0.25rem 0.75rem;
+    background: #fef3c7;
+    border-radius: var(--radius);
+    margin-bottom: 1.25rem;
+}
+
+.tracker-branch-rejected {
+    color: var(--danger);
+    background: #fee2e2;
+}
+
+/* ── Approval Gate (Article Detail Sidebar) ─────────────── */
+
+.approval-gate {
+    text-align: center;
+}
+
+.approval-score {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+}
+
+.approval-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+}
+
+.approval-separator {
+    font-size: 1.5rem;
+    color: var(--gray-400);
+}
+
+.approval-threshold {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--gray-400);
+}
+
+.approval-label {
+    font-size: 0.85rem;
+    color: var(--gray-600);
+}
+
+.score-bar-large {
+    position: relative;
+}
+
+.approval-marker {
+    position: absolute;
+    top: -4px;
+    width: 3px;
+    height: 20px;
+    background: var(--gray-700);
+    border-radius: 1px;
+    transform: translateX(-50%);
+}
+
+/* ── Additional Status Badges ───────────────────────────── */
+
+.status-todo {
+    background: var(--gray-200);
+    color: var(--gray-700);
+}
+
+.status-in_progress {
+    background: #ede9fe;
+    color: #5b21b6;
+}
+
+.status-amplified {
+    background: #cffafe;
+    color: #155e75;
+}
+
+.status-backlog {
+    background: var(--gray-100);
+    color: var(--gray-500);
+}
