@@ -541,10 +541,13 @@ SOURCES: source1, source2, source3"""
         - Competitor headings → content gap analysis
 
         Returns formatted context string for the outline prompt, or empty
-        string if no SERP backend is configured.
+        string if SERP analysis is disabled or no backend is configured.
         """
         keyword = article.target_keyword or ""
         if not keyword:
+            return ""
+
+        if not getattr(self.config, "serp", None) or not self.config.serp.enabled:
             return ""
 
         try:

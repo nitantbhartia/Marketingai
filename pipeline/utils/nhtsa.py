@@ -146,10 +146,18 @@ def parse_vehicle_from_keyword(keyword: str) -> dict | None:
     - "Toyota Camry 2020 diminished value"
     - "honda accord total loss"
     """
-    # Pattern: year make model
+    # Insurance terms that signal the end of the vehicle name
+    _STOP_WORDS = (
+        "total|loss|value|diminished|settlement|insurance|claim|worth|cost|"
+        "accident|damage|repair|gap|coverage|appraisal|review|guide|calculator|"
+        "salvage|threshold|payout|offer|lemon|recall|complaint|average"
+    )
+
+    # Pattern: year make model (make and model must not be stop words)
     match = re.search(
-        r"\b(20[0-2][0-9])\s+([A-Za-z]+)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)\b",
+        rf"\b(20[0-2][0-9])\s+(?!(?:{_STOP_WORDS})\b)([A-Za-z]+)\s+([A-Za-z]+(?:\s+(?!{_STOP_WORDS}\b)[A-Za-z]+)?)\b",
         keyword,
+        re.IGNORECASE,
     )
     if match:
         return {
@@ -158,10 +166,11 @@ def parse_vehicle_from_keyword(keyword: str) -> dict | None:
             "model": match.group(3).title(),
         }
 
-    # Pattern: make model year
+    # Pattern: make model year (make must not be a stop word)
     match = re.search(
-        r"\b([A-Za-z]+)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(20[0-2][0-9])\b",
+        rf"\b(?!(?:{_STOP_WORDS})\b)([A-Za-z]+)\s+([A-Za-z]+(?:\s+(?!{_STOP_WORDS}\b)[A-Za-z]+)?)\s+(20[0-2][0-9])\b",
         keyword,
+        re.IGNORECASE,
     )
     if match:
         return {
