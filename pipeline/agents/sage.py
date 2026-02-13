@@ -363,15 +363,40 @@ class SageAgent(BaseAgent):
         for v in product_result.get("hard_violations", []):
             all_issues.append(f"[Product Compliance] {v.get('suggestion', v.get('matched_text', ''))}")
 
+        # ── Critical violation detection ──
+        # Legal compliance = 0, product FAIL, or state FAIL are critical
+        # issues that can't be trusted through 5 revision rounds. Cap at 2
+        # rounds to save tokens and prevent publishing risk.
+        has_critical = (
+            legal_score == 0
+            or product_compliance == "FAIL"
+            or state_accuracy == "FAIL"
+        )
+        critical_reasons: list[str] = []
+        if legal_score == 0:
+            critical_reasons.append("legal compliance violation")
+        if product_compliance == "FAIL":
+            critical_reasons.append("unauthorized product claims")
+        if state_accuracy == "FAIL":
+            critical_reasons.append("incorrect state regulation facts")
+
+        max_rounds = 2 if has_critical else self.config.pipeline.max_revision_rounds
+
         # Decision — all non-passing articles enter the revision loop so
         # Quill can automatically improve them using Sage's feedback.
-        # Articles are only rejected when max revision rounds are exhausted.
+        # Critical violations get max 2 rounds; standard issues get 5.
         total_score = round(total_score, 1)
         threshold = self.config.pipeline.approval_score_threshold
-        if total_score >= threshold:
+        if total_score >= threshold and not has_critical:
             decision = "approved"
             new_status = ArticleStatus.REVIEW.value  # Human review before publish
-        elif article.revision_count >= self.config.pipeline.max_revision_rounds:
+        elif total_score >= threshold and has_critical:
+            # Score is high enough BUT critical violations remain — cannot
+            # approve content with legal/product/state issues regardless
+            # of score. Send back for targeted fix.
+            decision = "revision"
+            new_status = ArticleStatus.REVISION.value
+        elif article.revision_count >= max_rounds:
             decision = "rejected"
             new_status = ArticleStatus.REJECTED.value
         else:
@@ -381,8 +406,20 @@ class SageAgent(BaseAgent):
         # Format revision notes
         revision_notes = self._format_review(scores, total_score, decision, all_issues)
 
-        if decision == "rejected":
+        if decision == "rejected" and has_critical:
+            revision_notes += (
+                f"\n\n[REJECTED: Critical violation(s) not resolved after "
+                f"{article.revision_count} revision(s): {', '.join(critical_reasons)}]"
+            )
+        elif decision == "rejected":
             revision_notes += "\n\n[REJECTED: Maximum revision rounds exceeded]"
+
+        if decision == "revision" and has_critical:
+            revision_notes += (
+                f"\n\n[CRITICAL: {', '.join(critical_reasons).upper()} — "
+                f"fix immediately or article will be rejected after "
+                f"{max_rounds - article.revision_count} more round(s)]"
+            )
 
         # Update article
         update_kwargs = {
