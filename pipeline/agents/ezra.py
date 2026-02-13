@@ -104,6 +104,34 @@ class EzraAgent(BaseAgent):
                 "error": "Could not claim article",
             }
 
+        # Validate article has publishable content
+        if not article.markdown_content or len(article.markdown_content) < 200:
+            self.logger.error(
+                f"Article {article_id} missing or too short content "
+                f"({len(article.markdown_content or '')} chars), cannot publish"
+            )
+            self.db.update_article(
+                article_id,
+                publisher_claim="",
+                status=ArticleStatus.REVISION.value,
+                revision_notes=(article.revision_notes or "")
+                + "\n\n[EZRA] Cannot publish: article content missing or too short",
+            )
+            return {
+                "article_id": article_id,
+                "success": False,
+                "error": "Content missing or too short to publish",
+            }
+
+        if not article.title:
+            self.logger.error(f"Article {article_id} has no title, cannot publish")
+            self.db.update_article(article_id, publisher_claim="")
+            return {
+                "article_id": article_id,
+                "success": False,
+                "error": "Article has no title",
+            }
+
         self.logger.info(f"Publishing: {article.title}")
 
         try:

@@ -90,6 +90,10 @@ class Rival(Agent):
                 self.log(f"Error analyzing {domain}: {e}", level="error")
                 continue
 
+        # Bridge competitor gaps into the pipeline lesson system so Scout
+        # can prioritize these keywords in future topic discovery.
+        self._record_pipeline_lessons(results["opportunities"])
+
         # Log activity
         log_agent_action(
             agent_name=self.name,
@@ -97,8 +101,25 @@ class Rival(Agent):
             details=results
         )
 
-        self.log(f"✓ Competitor analysis complete: {results['gaps_identified']} gaps found")
+        self.log(f"Competitor analysis complete: {results['gaps_identified']} gaps found")
         return results
+
+    def _record_pipeline_lessons(self, opportunities: List[Dict]) -> None:
+        """Bridge competitor gaps into the pipeline lesson DB for Scout."""
+        try:
+            from pipeline.db import Database
+            db = Database()
+            for gap in opportunities[:10]:
+                keyword = gap.get("keyword", "")
+                domain = gap.get("competitor_domain", "")
+                if keyword:
+                    db.upsert_lesson(
+                        "rival", "scout", "competitor_gap",
+                        f"Competitor gap: '{keyword}' (ranked by {domain}, "
+                        f"we have no article)",
+                    )
+        except Exception:
+            pass  # Don't break Rival if pipeline DB is unavailable
 
     def _get_our_keywords(self) -> set:
         """Get keywords we already target."""

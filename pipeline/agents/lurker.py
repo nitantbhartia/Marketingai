@@ -131,6 +131,21 @@ class LurkerAgent(BaseAgent):
                         f"r/{sub} ({rate:.0%} approval rate — consider deprioritizing)",
                     )
 
+        # Feed high-engagement community topics back to Scout so it can
+        # discover topics people are actively asking about.
+        high_engagement = [
+            opp for opp in all_opps
+            if opp.engagement_count >= 20
+            and opp.relevance_score >= 0.7
+            and opp.status in ("approved", "posted")
+        ]
+        for opp in high_engagement[:5]:
+            self.record_lesson(
+                "scout", "community_demand",
+                f"High engagement ({opp.engagement_count} comments) in "
+                f"r/{opp.subreddit}: {opp.thread_title}",
+            )
+
     def _search_reddit(self) -> list[dict]:
         """Search Reddit for relevant threads."""
         opportunities = []

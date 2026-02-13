@@ -242,13 +242,22 @@ class ScoutAgent(BaseAgent):
         if not lessons:
             return {}
 
-        hints: dict[str, list[str]] = {"preferred": [], "avoid": [], "gsc_insights": []}
+        hints: dict[str, list[str]] = {
+            "preferred": [], "avoid": [], "gsc_insights": [],
+            "competitor_gaps": [], "community_demand": [],
+        }
         for lesson in lessons:
             if lesson.category == "high_pass_category" and lesson.occurrences >= 2:
                 hints["preferred"].append(lesson.lesson)
             elif lesson.category == "low_pass_category" and lesson.occurrences >= 3:
                 hints["avoid"].append(lesson.lesson)
             elif lesson.category.startswith("gsc_"):
+                hints["gsc_insights"].append(lesson.lesson)
+            elif lesson.category == "competitor_gap":
+                hints["competitor_gaps"].append(lesson.lesson)
+            elif lesson.category == "community_demand":
+                hints["community_demand"].append(lesson.lesson)
+            elif lesson.category == "performance":
                 hints["gsc_insights"].append(lesson.lesson)
         return hints
 
@@ -310,6 +319,14 @@ GAPS:
             for insight in hints["gsc_insights"][:3]:
                 perf_section += f"- {insight}\n"
             perf_section += "Use these insights to shape the brief.\n"
+        if hints.get("competitor_gaps"):
+            perf_section += "\n\nCompetitor gaps identified by Rival agent:\n"
+            for gap in hints["competitor_gaps"][:3]:
+                perf_section += f"- {gap}\n"
+        if hints.get("community_demand"):
+            perf_section += "\n\nHigh-engagement community topics (from Lurker):\n"
+            for topic in hints["community_demand"][:3]:
+                perf_section += f"- {topic}\n"
 
         # Run gap analysis to find what competitors miss
         gap_analysis = self._analyze_competitor_gaps(keyword)
