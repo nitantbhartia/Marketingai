@@ -166,40 +166,58 @@ class SageAgent(BaseAgent):
         total_score += seo_raw
         all_issues.extend(seo_issues)
 
-        # 3. Readability (15 pts)
+        # 3. Readability (15 pts — 8 sub-metrics)
         read_report = readability_report(content)
         read_score = 0.0
         read_issues = read_report["issues"]
-        # Flesch-Kincaid (5 pts)
+        # 3a. Flesch-Kincaid (3 pts)
         if read_report["flesch_kincaid"] >= 60:
-            read_score += 5
+            read_score += 3
         elif read_report["flesch_kincaid"] >= 50:
-            read_score += 2.5
-        # Sentence length (3 pts)
-        if read_report["avg_sentence_length"] <= 25:
-            read_score += 3
-        elif read_report["avg_sentence_length"] <= 30:
             read_score += 1.5
-        # Passive voice (3 pts) — target ≤15%
-        if read_report["passive_voice_ratio"] <= 0.10:
-            read_score += 3
-        elif read_report["passive_voice_ratio"] <= 0.15:
+        # 3b. Sentence length (2 pts)
+        if read_report["avg_sentence_length"] <= 25:
             read_score += 2
-        elif read_report["passive_voice_ratio"] <= 0.25:
+        elif read_report["avg_sentence_length"] <= 30:
             read_score += 1
-        # Transition words (2 pts) — target ≥25%
+        # 3c. Paragraph length (2 pts)
+        if read_report["avg_paragraph_length"] <= 4:
+            read_score += 2
+        elif read_report["avg_paragraph_length"] <= 5:
+            read_score += 1
+        # 3d. Passive voice (2 pts) — target ≤15%
+        if read_report["passive_voice_ratio"] <= 0.10:
+            read_score += 2
+        elif read_report["passive_voice_ratio"] <= 0.15:
+            read_score += 1.5
+        elif read_report["passive_voice_ratio"] <= 0.25:
+            read_score += 0.5
+        # 3e. Transition words (2 pts) — target ≥25%
         if read_report["transition_word_score"] >= 0.30:
             read_score += 2
         elif read_report["transition_word_score"] >= 0.25:
             read_score += 1.5
         elif read_report["transition_word_score"] >= 0.15:
             read_score += 0.5
-        # Sentence variety (2 pts) — target CV ≥0.40
+        # 3f. Sentence variety (1.5 pts) — target CV ≥0.40
         if read_report["sentence_length_variety"] >= 0.50:
-            read_score += 2
-        elif read_report["sentence_length_variety"] >= 0.40:
             read_score += 1.5
+        elif read_report["sentence_length_variety"] >= 0.40:
+            read_score += 1
         elif read_report["sentence_length_variety"] >= 0.30:
+            read_score += 0.5
+        # 3g. Complex word density (1.5 pts) — target ≤8%
+        if read_report["complex_word_density"] <= 0.05:
+            read_score += 1.5
+        elif read_report["complex_word_density"] <= 0.08:
+            read_score += 1
+        elif read_report["complex_word_density"] <= 0.12:
+            read_score += 0.5
+        # 3h. Heading structure (1 pt)
+        headings = read_report["heading_structure"]
+        if headings["h2_count"] >= 3 and not headings["issues"]:
+            read_score += 1
+        elif headings["h2_count"] >= 2:
             read_score += 0.5
         scores["readability"] = {"score": read_score, "max": 15, "issues": read_issues}
         total_score += read_score
