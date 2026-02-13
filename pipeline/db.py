@@ -63,7 +63,8 @@ class Article:
 
     # Validation results
     validation_status: str = ""
-    seo_score: float = 0.0
+    sage_score: float = 0.0         # Total Sage review score (0-100)
+    seo_score: float = 0.0          # SEO sub-score (0-20)
     readability_score: float = 0.0
     word_count: int = 0
     state_accuracy: str = ""
@@ -187,6 +188,7 @@ CREATE TABLE IF NOT EXISTS articles (
 
     -- Validation results
     validation_status TEXT DEFAULT '',
+    sage_score REAL DEFAULT 0.0,
     seo_score REAL DEFAULT 0.0,
     readability_score REAL DEFAULT 0.0,
     word_count INTEGER DEFAULT 0,
@@ -293,6 +295,7 @@ _PIPELINE_COLUMN_MIGRATIONS = {
     "suggested_title": "TEXT DEFAULT ''",
     "internal_links": "TEXT DEFAULT '[]'",
     "external_links": "TEXT DEFAULT '[]'",
+    "sage_score": "REAL DEFAULT 0.0",
 }
 
 

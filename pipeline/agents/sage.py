@@ -273,6 +273,7 @@ class SageAgent(BaseAgent):
         # Update article
         update_kwargs = {
             "status": new_status,
+            "sage_score": total_score,
             "seo_score": seo_raw,
             "readability_score": read_report["flesch_kincaid"],
             "word_count": wc,
