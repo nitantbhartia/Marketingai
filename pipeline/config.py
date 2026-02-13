@@ -53,6 +53,18 @@ class GeminiConfig:
 
 
 @dataclass
+class SerpConfig:
+    """SERP analysis configuration for real-time search data."""
+    # SerpAPI key (paid, ~$50/mo for 5k queries)
+    serpapi_key: str = ""
+    # Google Custom Search Engine (free, 100 queries/day)
+    google_cse_key: str = ""
+    google_cse_id: str = ""
+    # Enable/disable SERP analysis (autocomplete always runs as free fallback)
+    enabled: bool = True
+
+
+@dataclass
 class ImageConfig:
     """Image resolution configuration for converting placeholders to real URLs."""
     # Unsplash API key (optional — Source API works without it for low volume)
@@ -127,6 +139,7 @@ class ScheduleConfig:
 class Config:
     anthropic: AnthropicConfig = field(default_factory=AnthropicConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
+    serp: SerpConfig = field(default_factory=SerpConfig)
     images: ImageConfig = field(default_factory=ImageConfig)
     blog: BlogConfig = field(default_factory=BlogConfig)
     copyscape: CopyscapeConfig = field(default_factory=CopyscapeConfig)
@@ -188,6 +201,15 @@ class Config:
         cfg.images.unsplash_access_key = (
             os.environ.get("UNSPLASH_ACCESS_KEY") or cfg.images.unsplash_access_key
         )
+        cfg.serp.serpapi_key = (
+            os.environ.get("SERPAPI_KEY") or cfg.serp.serpapi_key
+        )
+        cfg.serp.google_cse_key = (
+            os.environ.get("GOOGLE_CSE_KEY") or cfg.serp.google_cse_key
+        )
+        cfg.serp.google_cse_id = (
+            os.environ.get("GOOGLE_CSE_ID") or cfg.serp.google_cse_id
+        )
         cfg.llm_provider = (
             os.environ.get("LLM_PROVIDER") or cfg.llm_provider
         )
@@ -207,6 +229,7 @@ class Config:
         section_map = {
             "anthropic": self.anthropic,
             "gemini": self.gemini,
+            "serp": self.serp,
             "images": self.images,
             "blog": self.blog,
             "copyscape": self.copyscape,
