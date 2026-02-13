@@ -205,6 +205,76 @@ def sentence_length_variety(text: str) -> float:
     return round(std / mean, 3)
 
 
+def complex_word_density(text: str) -> float:
+    """Fraction of words with 3+ syllables, excluding whitelisted insurance terms.
+
+    High density (>8%) signals jargon-heavy writing that is hard for stressed
+    car owners to parse.  Returns a ratio between 0.0 and 1.0.
+    """
+    # Insurance-domain terms readers are expected to know
+    _WHITELIST = {
+        "insurance", "adjuster", "settlement", "deductible", "liability",
+        "collision", "comprehensive", "diminished", "policyholder", "underinsured",
+        "uninsured", "subrogation", "arbitration", "appraisal", "depreciation",
+        "claimcoach", "attorney", "coverage", "vehicle", "accident",
+        "estimate", "replacement", "another", "following", "important",
+        "together", "however", "remember", "example", "understand",
+        "determine", "continue", "different", "already", "government",
+        "company", "companies", "customer", "customers", "paragraph",
+        "percentage", "recommended", "additional", "department",
+        "everything", "everyone", "interested", "usually", "typically",
+    }
+    clean = _strip_markdown(text)
+    words = re.findall(r"\b[a-zA-Z]+\b", clean)
+    if not words:
+        return 0.0
+
+    complex_count = sum(
+        1 for w in words
+        if count_syllables(w) >= 3 and w.lower() not in _WHITELIST
+    )
+    return round(complex_count / len(words), 3)
+
+
+def heading_structure_score(text: str) -> dict:
+    """Analyze heading (H2/H3) distribution and density.
+
+    Good articles have:
+    - At least 3 H2 sections
+    - Roughly 1 heading per 250-350 words of body text
+    - H3 sub-headings under long H2 sections
+
+    Returns dict with score details.
+    """
+    h2s = re.findall(r"^##\s+(.+)$", text, re.MULTILINE)
+    h3s = re.findall(r"^###\s+(.+)$", text, re.MULTILINE)
+    total_headings = len(h2s) + len(h3s)
+    wc = word_count(text)
+
+    issues = []
+
+    if len(h2s) < 3:
+        issues.append(f"Only {len(h2s)} H2 headings (target: ≥3 sections)")
+
+    # Heading density: words per heading
+    if total_headings > 0:
+        words_per_heading = wc / total_headings
+        if words_per_heading > 400:
+            issues.append(
+                f"Heading every {int(words_per_heading)} words (target: every 250-350 words)"
+            )
+    elif wc > 300:
+        issues.append("No headings found in article")
+
+    return {
+        "h2_count": len(h2s),
+        "h3_count": len(h3s),
+        "total_headings": total_headings,
+        "words_per_heading": round(wc / total_headings, 1) if total_headings else 0,
+        "issues": issues,
+    }
+
+
 def readability_report(text: str) -> dict:
     """Generate a full readability report."""
     fk = flesch_kincaid_score(text)
@@ -214,6 +284,8 @@ def readability_report(text: str) -> dict:
     passive = passive_voice_ratio(text)
     transitions = transition_word_score(text)
     variety = sentence_length_variety(text)
+    complex_density = complex_word_density(text)
+    headings = heading_structure_score(text)
 
     issues = []
     if fk < 60:
@@ -230,6 +302,10 @@ def readability_report(text: str) -> dict:
         issues.append(f"Transition words in only {pct}% of sentences (target: ≥25%)")
     if variety < 0.40:
         issues.append(f"Low sentence length variety (CV={variety}, target: ≥0.40) — mix short and long sentences")
+    if complex_density > 0.08:
+        pct = round(complex_density * 100)
+        issues.append(f"Complex word density {pct}% (target: ≤8%) — simplify multi-syllable words")
+    issues.extend(headings["issues"])
 
     return {
         "flesch_kincaid": fk,
@@ -238,6 +314,8 @@ def readability_report(text: str) -> dict:
         "passive_voice_ratio": passive,
         "transition_word_score": transitions,
         "sentence_length_variety": variety,
+        "complex_word_density": complex_density,
+        "heading_structure": headings,
         "word_count": wc,
         "issues": issues,
         "passes": fk >= 60 and avg_sent <= 25,
