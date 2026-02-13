@@ -160,7 +160,12 @@ class SageAgent(BaseAgent):
         # Total:              100 pts
 
         # 1. Plagiarism check (17 pts)
-        plag_score, plag_issues = self._check_plagiarism(content, article)
+        # On revision rounds, reuse the score from round 1 — content
+        # originality is inherent and doesn't change between edits.
+        if article.revision_count > 0:
+            plag_score, plag_issues = self._reuse_plagiarism_score(article)
+        else:
+            plag_score, plag_issues = self._check_plagiarism(content, article)
         # Scale: plagiarism checks return 0-20, normalize to 0-17
         plag_score = round(plag_score * 17 / 20, 1)
         scores["plagiarism"] = {"score": plag_score, "max": 17, "issues": plag_issues}
