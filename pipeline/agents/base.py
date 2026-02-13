@@ -34,9 +34,9 @@ _TIER_LIMITS: dict[str, str] = {
 # --------------------------------------------------------------------------
 _token_lock = threading.Lock()
 _token_window: list[tuple[float, int]] = []  # (timestamp, token_count) entries
-_TPM_LIMIT = 250_000  # Gemini free tier TPM limit
-_TPM_WINDOW = 60.0    # 60-second sliding window
-_TPM_PARK_SECONDS = 30.0  # How long to park when approaching limit
+_TPM_LIMIT = 4_000_000  # Gemini paid tier TPM limit
+_TPM_WINDOW = 60.0      # 60-second sliding window
+_TPM_PARK_SECONDS = 5.0  # How long to park when approaching limit
 
 
 def _budget_key(model: str) -> str:
@@ -366,7 +366,7 @@ class BaseAgent(ABC):
             time.sleep(_TPM_PARK_SECONDS)
 
         # ── Rate limiter: enforce minimum delay between Gemini calls ──
-        min_delay = getattr(self.config.gemini, "rate_limit_delay", 12.0)
+        min_delay = getattr(self.config.gemini, "rate_limit_delay", 0.5)
         with _gemini_lock:
             elapsed = time.time() - _gemini_last_call
             if elapsed < min_delay:
