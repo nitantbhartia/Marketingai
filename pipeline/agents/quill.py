@@ -268,6 +268,7 @@ class QuillAgent(BaseAgent):
         if is_revision and article.markdown_content:
             result = self._targeted_revision(
                 article, product_context, state_rules, internal_links_context, lessons,
+                published_articles=published,
             )
             if result:
                 return result
@@ -310,6 +311,7 @@ class QuillAgent(BaseAgent):
             # ── Phase 3: Self-review & auto-fix ──
             content, meta_description, fixes = self._self_review_and_fix(
                 content, meta_description, article,
+                published_articles=published,
             )
 
             slug = self._generate_slug(title)
@@ -843,6 +845,7 @@ Article:
     # ------------------------------------------------------------------
     def _self_review_and_fix(
         self, content: str, meta_description: str, article,
+        published_articles: list | None = None,
     ) -> tuple[str, str, list[str]]:
         """Run deterministic checks and fix what we can before Sage sees it.
 
@@ -958,10 +961,166 @@ Article:
             content = re.sub(r"  +", " ", content)
             fixes.append(f"removed_{ai_ism_count}_ai_isms")
 
+        # Check 7: Internal links — inject links to published articles if missing.
+        # This directly impacts Sage scoring: SEO internal_links (3pts) +
+        # Sage internal_links category (10pts) = 13pts at stake.
+        internal, external = extract_links(content)
+        if len(internal) < 3 and published_articles:
+            injected = self._inject_internal_links(
+                content, published_articles, existing_count=len(internal),
+            )
+            if injected != content:
+                content = injected
+                new_internal, _ = extract_links(content)
+                fixes.append(f"injected_{len(new_internal) - len(internal)}_internal_links")
+
+        # Check 8: External links — inject authoritative sources if missing.
+        # Sage SEO deducts 2pts for missing external links.
+        _, external = extract_links(content)
+        if len(external) < 2:
+            injected = self._inject_external_links(
+                content, article, existing_count=len(external),
+            )
+            if injected != content:
+                content = injected
+                _, new_external = extract_links(content)
+                fixes.append(f"injected_{len(new_external) - len(external)}_external_links")
+
         if fixes:
             logger.info(f"Self-review applied {len(fixes)} fixes: {fixes}")
 
         return content, meta_description, fixes
+
+    @staticmethod
+    def _inject_internal_links(
+        content: str, published: list, existing_count: int = 0,
+    ) -> str:
+        """Deterministically inject internal links to published articles.
+
+        Finds mentions of published article keywords/titles in the content
+        and wraps the first occurrence with a markdown link.
+        """
+        target_count = max(0, 3 - existing_count)
+        if target_count == 0 or not published:
+            return content
+
+        injected = 0
+        for article in published[:15]:
+            if injected >= target_count:
+                break
+            url = article.published_url or f"https://claimcoach.app/blog/{article.slug}"
+            if not url or url in content:
+                continue
+
+            # Try to find the article's keyword or title in the content
+            keyword = article.target_keyword or ""
+            title = article.title or ""
+            anchor = None
+            for term in [keyword, title]:
+                if not term or len(term) < 5:
+                    continue
+                # Look for the term in prose (not inside existing links or headers)
+                escaped = re.escape(term)
+                pattern = re.compile(
+                    r"(?<!\[)(?<!\()" + escaped + r"(?!\])" + r"(?!\))",
+                    re.IGNORECASE,
+                )
+                match = pattern.search(content)
+                if match:
+                    anchor = match.group(0)
+                    content = content[:match.start()] + f"[{anchor}]({url})" + content[match.end():]
+                    injected += 1
+                    break
+
+        # Fallback: if no keyword matches found, append a "Related Reading" section
+        if injected == 0 and target_count > 0:
+            related = []
+            for article in published[:3]:
+                url = article.published_url or f"https://claimcoach.app/blog/{article.slug}"
+                if url:
+                    related.append(f"- [{article.title}]({url})")
+            if related:
+                # Insert before the last ## section (CTA)
+                cta_match = re.search(
+                    r"\n##\s.*(?:Next Step|Get Started|Take Action|ClaimCoach)",
+                    content, re.IGNORECASE,
+                )
+                block = "\n\n## Related Reading\n\n" + "\n".join(related) + "\n"
+                if cta_match:
+                    content = content[:cta_match.start()] + block + content[cta_match.start():]
+                else:
+                    content += block
+                injected = len(related)
+
+        return content
+
+    @staticmethod
+    def _inject_external_links(
+        content: str, article, existing_count: int = 0,
+    ) -> str:
+        """Inject authoritative external links if the article has fewer than 2.
+
+        Uses state-specific DOI links when a target_state is set, otherwise
+        falls back to general authoritative insurance sources.
+        """
+        target_count = max(0, 2 - existing_count)
+        if target_count == 0:
+            return content
+
+        state = (article.target_state or "").strip()
+
+        # Authoritative sources with anchor text patterns to look for
+        sources = []
+        if state:
+            sources.append({
+                "url": f"https://www.naic.org/state_web_map.htm",
+                "anchors": ["department of insurance", "doi", "state insurance", "naic",
+                            "insurance commissioner", "insurance regulator"],
+                "fallback_text": f"National Association of Insurance Commissioners (NAIC)",
+            })
+        sources.extend([
+            {
+                "url": "https://www.naic.org/",
+                "anchors": ["naic", "national association of insurance",
+                            "insurance commissioner", "insurance regulation"],
+                "fallback_text": "National Association of Insurance Commissioners",
+            },
+            {
+                "url": "https://consumer.ftc.gov/",
+                "anchors": ["federal trade commission", "ftc", "consumer protection",
+                            "consumer rights"],
+                "fallback_text": "Federal Trade Commission consumer resources",
+            },
+        ])
+
+        injected = 0
+        for source in sources:
+            if injected >= target_count:
+                break
+            if source["url"] in content:
+                continue
+
+            linked = False
+            for anchor_text in source["anchors"]:
+                escaped = re.escape(anchor_text)
+                pattern = re.compile(
+                    r"(?<!\[)(?<!\()" + escaped + r"(?!\])" + r"(?!\))",
+                    re.IGNORECASE,
+                )
+                match = pattern.search(content)
+                if match:
+                    original = match.group(0)
+                    content = (
+                        content[:match.start()]
+                        + f"[{original}]({source['url']})"
+                        + content[match.end():]
+                    )
+                    injected += 1
+                    linked = True
+                    break
+
+            # If no anchor found in text, skip (don't force-insert)
+        return content
 
     def _generate_faq_block(self, article) -> str:
         """Generate a quick FAQ section using Flash-Lite (utility tier)."""
@@ -1041,13 +1200,26 @@ Article:
     def _targeted_revision(
         self, article, product_context: str, state_rules: str,
         internal_links: str, lessons: str,
+        published_articles: list | None = None,
     ) -> dict[str, Any] | None:
         """Fix specific issues from Sage's feedback without rewriting everything.
 
         Parses the revision_notes to identify specific, fixable issues and
         makes targeted edits. Returns None if the issues are too broad for
         targeted fixes (falls through to full rewrite).
+
+        Skips targeted revision on round 2+ because if the first targeted
+        attempt didn't raise the score, a full rewrite is needed.
         """
+        # On 2nd+ revision, targeted fixes already ran once — go straight
+        # to full rewrite which produces substantially different content.
+        if article.revision_count >= 2:
+            logger.info(
+                f"Revision round {article.revision_count} — skipping targeted "
+                f"revision, doing full rewrite"
+            )
+            return None
+
         notes = article.revision_notes or ""
         issues = self._parse_revision_issues(notes)
         if not issues:
@@ -1085,7 +1257,9 @@ Article:
         meta = article.meta_description or ""
 
         # Apply targeted fixes
-        content, meta, fixes = self._self_review_and_fix(content, meta, article)
+        content, meta, fixes = self._self_review_and_fix(
+            content, meta, article, published_articles=published_articles,
+        )
 
         # For remaining broad issues, ask LLM for a focused edit
         if broad:
@@ -1147,6 +1321,10 @@ Article:
                 word_count=wc,
                 status=ArticleStatus.REVIEW.value,
                 writer_claim="",
+                revision_notes=(
+                    f"[Targeted revision in round {article.revision_count + 1} — "
+                    f"applied fixes: {', '.join(fixes) or 'none'}]"
+                ),
             )
         except Exception as e:
             logger.error(
