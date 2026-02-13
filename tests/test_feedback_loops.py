@@ -188,3 +188,116 @@ class TestArticleFieldConsistency:
             assert field.isidentifier(), f"Unsafe field name: {field}"
             assert " " not in field
             assert ";" not in field
+
+
+# ---------------------------------------------------------------------------
+# Internal link injection
+# ---------------------------------------------------------------------------
+
+class TestInternalLinkInjection:
+    """Ensure Quill injects internal links to published articles."""
+
+    def setup_method(self):
+        from pipeline.agents.quill import QuillAgent
+        self.inject = QuillAgent._inject_internal_links
+
+    def test_injects_links_on_keyword_match(self):
+        content = (
+            "## How to Handle Total Loss Settlements\n\n"
+            "When your car is totaled, you need to understand how "
+            "total loss settlement values are calculated. Many people "
+            "accept the first offer without knowing they can negotiate.\n\n"
+            "## Getting Fair Value\n\n"
+            "Your insurance company uses comparable vehicles to determine value."
+        )
+        published = [
+            Article(
+                id=1,
+                title="Total Loss Settlement Guide",
+                slug="total-loss-settlement-guide",
+                target_keyword="total loss settlement",
+                published_url="https://claimcoach.app/blog/total-loss-settlement-guide",
+            ),
+        ]
+        result = self.inject(content, published, existing_count=0)
+        assert "claimcoach.app/blog/total-loss-settlement-guide" in result
+        assert "[" in result  # Has markdown link syntax
+
+    def test_adds_related_reading_when_no_keyword_match(self):
+        content = (
+            "## Some Topic Without Keyword Matches\n\n"
+            "This article has no matching keywords from published articles.\n"
+        )
+        published = [
+            Article(
+                id=1,
+                title="Unrelated Guide",
+                slug="unrelated-guide",
+                target_keyword="completely different topic",
+                published_url="https://claimcoach.app/blog/unrelated-guide",
+            ),
+        ]
+        result = self.inject(content, published, existing_count=0)
+        assert "Related Reading" in result
+        assert "claimcoach.app/blog/unrelated-guide" in result
+
+    def test_skips_when_enough_links_exist(self):
+        content = "Some content with existing links."
+        published = [
+            Article(
+                id=1,
+                title="Guide",
+                slug="guide",
+                target_keyword="guide",
+                published_url="https://claimcoach.app/blog/guide",
+            ),
+        ]
+        result = self.inject(content, published, existing_count=3)
+        assert result == content  # No changes
+
+
+# ---------------------------------------------------------------------------
+# External link injection
+# ---------------------------------------------------------------------------
+
+class TestExternalLinkInjection:
+    """Ensure Quill injects authoritative external links."""
+
+    def setup_method(self):
+        from pipeline.agents.quill import QuillAgent
+        self.inject = QuillAgent._inject_external_links
+
+    def test_injects_naic_link_on_mention(self):
+        content = (
+            "## Understanding Your Rights\n\n"
+            "Contact your state's department of insurance to file a complaint. "
+            "They regulate insurance companies and protect consumers.\n"
+        )
+        article = Article(target_state="California", target_keyword="insurance complaint")
+        result = self.inject(content, article, existing_count=0)
+        assert "naic.org" in result
+
+    def test_skips_when_enough_links_exist(self):
+        content = "Article with existing external links."
+        article = Article(target_keyword="test")
+        result = self.inject(content, article, existing_count=2)
+        assert result == content  # No changes
+
+
+# ---------------------------------------------------------------------------
+# Targeted revision skips on round 2+
+# ---------------------------------------------------------------------------
+
+class TestTargetedRevisionRoundSkip:
+    """Ensure targeted revision skips on 2nd+ revision round."""
+
+    def test_parse_revision_issues_skips_addressed_marker(self):
+        """Targeted revision markers should not generate false issues."""
+        from pipeline.agents.quill import QuillAgent
+        parse = QuillAgent._parse_revision_issues
+        notes = (
+            "[Targeted revision in round 1 — "
+            "applied fixes: added_claimcoach_cta, added_faq_section]"
+        )
+        issues = parse(notes)
+        assert len(issues) == 0  # Marker line starts with "[", so it's skipped
