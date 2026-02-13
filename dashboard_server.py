@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, Request, HTTPException, Form
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -243,8 +243,10 @@ async def review_article(request: Request, article_id: int):
 
 
 @app.post("/api/article/{article_id}/approve")
-async def approve_article(article_id: int, notes: str = Form("")):
+async def approve_article(article_id: int, request: Request):
     """Approve an article for publishing."""
+    body = await request.json()
+    notes = body.get("notes", "")
 
     with get_db() as db:
         # Update status
@@ -268,8 +270,12 @@ async def approve_article(article_id: int, notes: str = Form("")):
 
 
 @app.post("/api/article/{article_id}/reject")
-async def reject_article(article_id: int, reason: str = Form(...)):
+async def reject_article(article_id: int, request: Request):
     """Reject an article and request revision."""
+    body = await request.json()
+    reason = body.get("reason", "")
+    if not reason.strip():
+        raise HTTPException(status_code=422, detail="Reason is required")
 
     with get_db() as db:
         # Update status and add revision notes
