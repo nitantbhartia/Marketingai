@@ -45,7 +45,7 @@ def _make_config(**overrides) -> Config:
     cfg.gemini.api_key = ""  # Anthropic provider by default
     cfg.llm_provider = "anthropic"
     cfg.pipeline.max_revision_rounds = 5
-    cfg.pipeline.approval_score_threshold = 90
+    cfg.pipeline.approval_score_threshold = 80
     cfg.copyscape.api_key = ""  # No Copyscape
     for k, v in overrides.items():
         setattr(cfg, k, v)

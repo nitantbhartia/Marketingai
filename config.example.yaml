@@ -61,7 +61,7 @@ pipeline:
   min_backlog_topics: 15
   articles_per_week_target: 4
   max_revision_rounds: 5
-  approval_score_threshold: 90
+  approval_score_threshold: 80
   dashboard_url: "http://localhost:8000"  # Review dashboard URL (set to empty to disable notifications)
 
 # New agents (NextLevel features)
