@@ -280,6 +280,7 @@ class QuillAgent(BaseAgent):
         outline = self._generate_outline(
             article, product_context, state_rules, internal_links_context,
             entity_map=entity_map,
+            revision_feedback=article.revision_notes if is_revision else "",
         )
 
         # ── Phase 2: Write article (section-by-section from outline) ──
@@ -344,9 +345,10 @@ class QuillAgent(BaseAgent):
                     "word_count": wc,
                 }
 
-            # Save and submit to Sage
-            self.db.update_article(
-                article_id,
+            # Save and submit to Sage — clear stale revision_notes so Sage
+            # scores the new content fresh rather than being confused by
+            # feedback from a prior round that this rewrite already addressed.
+            update_kwargs = dict(
                 title=title,
                 markdown_content=content,
                 meta_description=meta_description,
@@ -355,6 +357,12 @@ class QuillAgent(BaseAgent):
                 status=ArticleStatus.REVIEW.value,
                 writer_claim="",
             )
+            if is_revision:
+                update_kwargs["revision_notes"] = (
+                    f"[Full rewrite in revision round {article.revision_count + 1} — "
+                    f"previous feedback incorporated into new outline and draft]"
+                )
+            self.db.update_article(article_id, **update_kwargs)
         except Exception as e:
             logger.error(f"Post-draft error for article {article_id}: {e}", exc_info=True)
             rollback_status = (
@@ -449,12 +457,16 @@ SOURCES: source1, source2, source3"""
     def _generate_outline(
         self, article, product_context: str, state_rules: str,
         internal_links: str, entity_map: str = "",
+        revision_feedback: str = "",
     ) -> str:
         """Generate a structured outline before writing.
 
         Uses a shorter LLM call to plan the article structure, key points,
         data to cite, and internal links to use. This ensures the draft
         phase has a clear roadmap and doesn't miss critical sections.
+
+        When revision_feedback is provided, the outline explicitly accounts
+        for the issues identified in the previous review round.
         """
         category_hint = CATEGORY_GUIDANCE.get(
             article.content_category or "", ""
@@ -467,6 +479,14 @@ SOURCES: source1, source2, source3"""
                 f"{entity_map}\n"
             )
 
+        revision_section = ""
+        if revision_feedback:
+            revision_section = (
+                f"\n=== REVISION FEEDBACK (the previous draft had these issues — "
+                f"your outline MUST address every one) ===\n"
+                f"{revision_feedback[-1500:]}\n"
+            )
+
         prompt = f"""Create a detailed OUTLINE for an article targeting: "{article.target_keyword}"
 
 Content category: {article.content_category or 'general'}
@@ -477,7 +497,7 @@ Content category: {article.content_category or 'general'}
 {f'Category strategy: {category_hint}' if category_hint else ''}
 
 {f'Internal links available: {internal_links}' if internal_links else ''}
-{entity_section}
+{entity_section}{revision_section}
 Create an outline with:
 1. **Hook** (first 100 words) — how to open with the keyword naturally
 2. **5-7 H2 sections** — each with:
@@ -555,6 +575,11 @@ Format as a clean outline with ## headers and bullet points."""
             context_block += f"=== INTERNAL LINKS ===\n{internal_links}\n\n"
         if lessons:
             context_block += f"=== PAST LESSONS ===\n{lessons}\n\n"
+        if is_revision and article.revision_notes:
+            context_block += (
+                f"=== REVISION FEEDBACK (address these issues) ===\n"
+                f"{article.revision_notes[-2000:]}\n\n"
+            )
 
         # Extract friction points from the content brief for variable injection
         friction_points = self._extract_friction_points(article)
@@ -1157,13 +1182,38 @@ Article:
 
     @staticmethod
     def _parse_revision_issues(notes: str) -> list[str]:
-        """Extract individual issues from Sage's revision notes."""
+        """Extract individual issues from Sage's revision notes.
+
+        Sage formats notes as:
+            ### Breakdown:
+            - **seo**: 15/20
+              - Keyword density too low       <-- indented sub-issue
+              - No FAQ section                <-- indented sub-issue
+            ### Issues to Fix:
+            - Keyword density too low         <-- top-level duplicate
+
+        We parse BOTH indented sub-issues (under category headers) and
+        the top-level "Issues to Fix" list, then deduplicate.
+        """
         issues = []
+        seen = set()
         for line in notes.split("\n"):
-            line = line.strip()
-            if line.startswith("- ") and not line.startswith("- **"):
-                issue = line[2:].strip()
-                if issue and len(issue) > 5:
+            stripped = line.strip()
+            # Skip category header lines like "- **seo**: 15/20"
+            if stripped.startswith("- **") and ":" in stripped:
+                continue
+            # Skip section headers and empty lines
+            if stripped.startswith("#") or not stripped:
+                continue
+            # Match both top-level "- issue" and indented "  - issue"
+            if stripped.startswith("- ") and len(stripped) > 7:
+                issue = stripped[2:].strip()
+                # Skip score-carried lines and meta lines
+                if issue.startswith("[") or issue.startswith("Plagiarism score carried"):
+                    continue
+                norm = issue.lower()
+                if norm not in seen:
+                    seen.add(norm)
                     issues.append(issue)
         return issues
 
