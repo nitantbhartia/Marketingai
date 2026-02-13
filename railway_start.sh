@@ -1,12 +1,19 @@
 #!/bin/bash
 # Combined startup script for Railway
 # Dashboard is the primary web process bound to $PORT
-# Cron worker runs in background for scheduled monitoring
+# Pipeline scheduler runs agents (Scout/Quill/Sage/Ezra/Herald) on cron schedules
+# Cron worker runs weekly monitoring jobs in background
 
 set -e
 
 echo "Starting ClaimCoach Pipeline Services..."
 echo ""
+
+# Start pipeline scheduler in background (runs Scout/Quill/Sage/Ezra/Herald/Morgan)
+echo "Starting pipeline scheduler (article agents)..."
+python -m pipeline.cli start &
+SCHEDULER_PID=$!
+echo "  Scheduler started (PID: $SCHEDULER_PID)"
 
 # Start cron worker in background (non-critical — OK if it fails)
 echo "Starting cron worker (scheduled monitoring)..."
