@@ -90,6 +90,9 @@
                 {% endif %}
                 <div class="lifecycle-total">
                     {{ status_counts.values()|sum }} total articles &middot; Approval threshold: {{ approval_threshold }}/100
+                    {% if rate_limit_count is defined and rate_limit_count > 0 %}
+                    &middot; <span style="color: #e67e22; font-weight: 600;">{{ rate_limit_count }} rate limit{{ 's' if rate_limit_count != 1 else '' }} (24h)</span>
+                    {% endif %}
                 </div>
             </div>
 

@@ -71,6 +71,16 @@ def _tokens_in_window() -> int:
         return sum(count for _, count in _token_window)
 
 
+class RateLimitError(Exception):
+    """Raised when LLM API returns 429 after exhausting retries.
+
+    Callers should catch this to distinguish transient rate limits from
+    real failures — articles should NOT be bounced to revision on rate
+    limits because the content hasn't changed.
+    """
+    pass
+
+
 class BaseAgent(ABC):
     """Base class for all pipeline agents."""
 
@@ -289,10 +299,44 @@ class BaseAgent(ABC):
             kwargs["temperature"] = temperature
 
         self.logger.debug(f"Calling Claude ({model}), prompt length={len(prompt)}")
-        response = client.messages.create(**kwargs)
-        text = response.content[0].text
-        self.logger.debug(f"Claude response length={len(text)}")
-        return text
+
+        max_retries = 3
+        last_error: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                response = client.messages.create(**kwargs)
+                text = response.content[0].text
+                self.logger.debug(f"Claude response length={len(text)}")
+                return text
+            except anthropic.RateLimitError as e:
+                last_error = e
+                wait = (2 ** attempt) * 2 + random.uniform(0, 1)
+                self.logger.warning(
+                    f"Anthropic 429 on attempt {attempt + 1}/{max_retries}, "
+                    f"retrying in {wait:.1f}s — {e}"
+                )
+                time.sleep(wait)
+                continue
+            except anthropic.APIStatusError as e:
+                if e.status_code in (500, 503, 529):
+                    last_error = e
+                    wait = (2 ** attempt) * 2 + random.uniform(0, 1)
+                    self.logger.warning(
+                        f"Anthropic {e.status_code} on attempt {attempt + 1}/{max_retries}, "
+                        f"retrying in {wait:.1f}s — {e}"
+                    )
+                    time.sleep(wait)
+                    continue
+                raise
+
+        # Exhausted retries — raise RateLimitError so callers can
+        # distinguish this from a real failure
+        self.logger.error(
+            f"Anthropic rate limit exhausted after {max_retries} attempts"
+        )
+        raise RateLimitError(
+            f"Anthropic API rate limited after {max_retries} retries: {last_error}"
+        )
 
     def _call_gemini(
         self, prompt: str, system: str, model: str | None, max_tokens: int,
@@ -366,7 +410,7 @@ class BaseAgent(ABC):
         self.logger.debug(f"Calling Gemini ({model_name}), prompt length={len(prompt)}")
         payload = json.dumps(body).encode()
 
-        max_retries = 2
+        max_retries = 3
         request_timeout = 60  # seconds per request
         last_error: Exception | None = None
         for attempt in range(max_retries):
@@ -425,6 +469,15 @@ class BaseAgent(ABC):
                 time.sleep(wait)
                 continue
 
+        # Distinguish rate limits from other failures so callers don't
+        # bounce articles to REVISION on transient 429s.
+        if isinstance(last_error, urllib.error.HTTPError) and last_error.code == 429:
+            self.logger.error(
+                f"Gemini rate limit exhausted after {max_retries} attempts"
+            )
+            raise RateLimitError(
+                f"Gemini API rate limited after {max_retries} retries"
+            ) from last_error
         raise last_error  # type: ignore[misc]
 
 

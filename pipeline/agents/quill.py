@@ -14,7 +14,7 @@ import re
 from collections import defaultdict
 from typing import Any
 
-from pipeline.agents.base import BaseAgent
+from pipeline.agents.base import BaseAgent, RateLimitError
 from pipeline.db import ArticleStatus
 from pipeline.utils.readability import readability_report, word_count
 from pipeline.utils.seo import _keyword_match, detect_faq_section, extract_links
@@ -216,8 +216,8 @@ class QuillAgent(BaseAgent):
             if result["status"] == "idle":
                 break  # nothing left to write
             results.append(result)
-            if result["status"] == "error":
-                break  # stop on first error to avoid burning quota
+            if result["status"] in ("error", "rate_limited"):
+                break  # stop on error or rate limit to avoid burning quota
 
         if not results:
             logger.info("No articles available to write")
@@ -266,10 +266,18 @@ class QuillAgent(BaseAgent):
 
         # ── Revision path: targeted fix instead of full rewrite ──
         if is_revision and article.markdown_content:
-            result = self._targeted_revision(
-                article, product_context, state_rules, internal_links_context, lessons,
-                published_articles=published,
-            )
+            try:
+                result = self._targeted_revision(
+                    article, product_context, state_rules, internal_links_context, lessons,
+                    published_articles=published,
+                )
+            except RateLimitError as e:
+                logger.warning(f"Rate limited during targeted revision of article {article_id}: {e}")
+                self.db.update_article(article_id, writer_claim="")
+                self.db.record_metric("rate_limit", 0, json.dumps({
+                    "agent": "quill", "article_id": article_id, "phase": "targeted_revision",
+                }))
+                return {"status": "rate_limited", "article_id": article_id, "reason": str(e)}
             if result:
                 return result
             # Fall through to full rewrite if targeted revision fails
@@ -290,6 +298,17 @@ class QuillAgent(BaseAgent):
                 article, outline, product_context, state_rules,
                 internal_links_context, is_revision, lessons,
             )
+        except RateLimitError as e:
+            # Rate limit — release claim but DON'T change article status.
+            # The article stays in its current status (IN_PROGRESS) and will
+            # be picked up again on the next scheduler run once the rate
+            # limit window resets.
+            logger.warning(f"Rate limited during draft of article {article_id}: {e}")
+            self.db.update_article(article_id, writer_claim="")
+            self.db.record_metric("rate_limit", 0, json.dumps({
+                "agent": "quill", "article_id": article_id, "phase": "draft",
+            }))
+            return {"status": "rate_limited", "article_id": article_id, "reason": str(e)}
         except Exception as e:
             logger.error(f"Draft error: {e}")
             rollback_status = (
@@ -365,6 +384,13 @@ class QuillAgent(BaseAgent):
                     f"previous feedback incorporated into new outline and draft]"
                 )
             self.db.update_article(article_id, **update_kwargs)
+        except RateLimitError as e:
+            logger.warning(f"Rate limited during post-draft of article {article_id}: {e}")
+            self.db.update_article(article_id, writer_claim="")
+            self.db.record_metric("rate_limit", 0, json.dumps({
+                "agent": "quill", "article_id": article_id, "phase": "post_draft",
+            }))
+            return {"status": "rate_limited", "article_id": article_id, "reason": str(e)}
         except Exception as e:
             logger.error(f"Post-draft error for article {article_id}: {e}", exc_info=True)
             rollback_status = (
@@ -1284,6 +1310,8 @@ Article:
                 if new_meta:
                     meta = new_meta
                 fixes.append(f"llm_targeted_fix:{len(broad)}_issues")
+            except RateLimitError:
+                raise  # Let rate limits propagate — don't bounce to revision
             except Exception as e:
                 logger.warning(f"Targeted LLM fix failed: {e}")
                 return None  # Fall through to full rewrite

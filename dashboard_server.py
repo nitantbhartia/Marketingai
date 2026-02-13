@@ -102,11 +102,25 @@ async def dashboard(request: Request):
         except Exception:
             approval_threshold = 90
 
+        # Get recent rate limit events (last 24 hours)
+        rate_limit_count = 0
+        try:
+            with get_db() as db:
+                cursor = db.execute("""
+                    SELECT COUNT(*) FROM pipeline_metrics
+                    WHERE metric_name = 'rate_limit'
+                    AND timestamp > datetime('now', '-24 hours')
+                """)
+                rate_limit_count = cursor.fetchone()[0]
+        except Exception:
+            pass  # Table may not exist yet
+
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
             "articles": articles,
             "status_counts": status_counts,
             "approval_threshold": approval_threshold,
+            "rate_limit_count": rate_limit_count,
             "recent_notifications": recent_notifications[-10:],  # Last 10
             "now": datetime.now()
         })
