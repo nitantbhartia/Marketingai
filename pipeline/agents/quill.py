@@ -1205,6 +1205,35 @@ Article:
         if freshness_fixes > 0:
             fixes.append(f"fixed_{freshness_fixes}_stale_year_references")
 
+        # Check 11: Interactive conversion tool — embed a mini widget
+        # placeholder based on article topic.  Ezra renders these into
+        # real HTML during publishing.
+        if "<!-- TOOL:" not in content:
+            from tools.data import get_tool_for_article
+            tool_id = get_tool_for_article(keyword, content)
+            if tool_id:
+                state_attr = ""
+                if article.target_state:
+                    state_attr = f' data-state="{article.target_state}"'
+                placeholder = (
+                    f"\n\n<!-- TOOL:{tool_id}:mini{state_attr} -->\n"
+                )
+                # Insert after the second H2 (roughly after problem section)
+                h2_matches = list(re.finditer(r"\n##\s", content))
+                if len(h2_matches) >= 2:
+                    pos = h2_matches[1].start()
+                    content = content[:pos] + placeholder + content[pos:]
+                else:
+                    # Fallback: insert at ~25% mark
+                    pos = len(content) // 4
+                    # Find next paragraph break
+                    nl = content.find("\n\n", pos)
+                    if nl > 0:
+                        content = content[:nl] + placeholder + content[nl:]
+                    else:
+                        content += placeholder
+                fixes.append(f"embedded_tool_{tool_id}")
+
         if fixes:
             logger.info(f"Self-review applied {len(fixes)} fixes: {fixes}")
 

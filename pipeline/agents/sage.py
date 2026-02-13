@@ -365,7 +365,16 @@ class SageAgent(BaseAgent):
         total_score += media_score
         all_issues.extend(media_issues)
 
-        # 9. State regulation accuracy
+        # 9b. Interactive tool embed (bonus — up to 2 pts, does not count toward max)
+        tool_score, tool_issues = self._check_tool_embed(content)
+        if tool_score > 0:
+            scores["interactive_tool"] = {"score": tool_score, "max": 2, "issues": tool_issues, "bonus": True}
+            total_score += tool_score
+        elif tool_issues:
+            scores["interactive_tool"] = {"score": 0, "max": 2, "issues": tool_issues, "bonus": True}
+            all_issues.extend(tool_issues)
+
+        # 10. State regulation accuracy
         state_validator = StateRegulationValidator()
         state_result = state_validator.validate(content, article.target_state)
         state_accuracy = state_result["status"]  # PASS / WARN / FAIL
@@ -960,6 +969,50 @@ Format each issue on its own line starting with "- "."""
             issues.append("No blockquote callouts — add Adjuster Insider tips for engagement")
 
         return round(score, 1), issues
+
+    @staticmethod
+    def _check_tool_embed(content: str) -> tuple[float, list[str]]:
+        """Bonus score for interactive conversion tool embeds (up to 2 pts).
+
+        Articles with an embedded interactive tool (sales tax calculator,
+        checklist, fairness quiz, etc.) convert 3-5x better than text-only CTAs.
+
+        Scoring:
+        - Tool placeholder present (1 pt)
+        - Tool is topic-relevant to the article (1 pt)
+        """
+        issues: list[str] = []
+        score = 0.0
+
+        # Look for tool placeholders: <!-- TOOL:tool_id:mini ... -->
+        tool_match = re.search(r"<!--\s*TOOL:([\w]+):([\w]+)", content)
+        if not tool_match:
+            issues.append(
+                "No interactive tool embedded — consider adding a calculator, "
+                "checklist, or quiz for higher conversion"
+            )
+            return score, issues
+
+        score += 1.0
+        tool_id = tool_match.group(1)
+
+        # Check topic relevance
+        content_lower = content.lower()
+        relevance_map = {
+            "sales_tax_calculator": ["sales tax", "tax recovery", "tax owed"],
+            "settlement_checklist": ["settlement", "line item", "checklist", "missing", "total loss"],
+            "fairness_quiz": ["fair", "lowball", "offer", "underpaid"],
+            "car_worth_estimator": ["car worth", "vehicle value", "actual cash value", "acv"],
+        }
+        triggers = relevance_map.get(tool_id, [])
+        if any(t in content_lower for t in triggers):
+            score += 1.0
+        else:
+            # Still give partial credit — any tool is better than none
+            score += 0.5
+            issues.append(f"Tool '{tool_id}' may not be the best match for this article's topic")
+
+        return score, issues
 
     # Patterns that indicate leaked LLM metadata in the article body.
     _LEAKED_META_RE = re.compile(

@@ -870,6 +870,164 @@ async def debug_database():
     }
 
 
+# ──────────────────────────────────────────────────────────────
+# Interactive Conversion Tools — API + standalone pages
+# ──────────────────────────────────────────────────────────────
+from tools.data import (
+    export_tool_data_json,
+    calculate_sales_tax,
+    calculate_checklist_results,
+    calculate_fairness_score,
+    STATE_SALES_TAX,
+)
+
+_TOOL_DATA_JSON = export_tool_data_json()
+
+# FAQ data for standalone tool pages
+_TOOL_FAQS = {
+    "sales_tax_calculator": [
+        {"q": "Is sales tax always included in total loss settlements?", "a": "In most states, insurers are required to include sales tax. However, some states (like Illinois and Ohio) require you to purchase a replacement vehicle within 30 days and provide documentation before reimbursing sales tax."},
+        {"q": "What if I'm keeping the totaled vehicle?", "a": "If you keep the vehicle (retain salvage), the sales tax calculation changes. You'll owe tax on the settlement amount minus the salvage value, since that's the net amount you'd spend on a replacement."},
+        {"q": "Does this apply to third-party claims?", "a": "Yes. Whether your own insurer (first-party) or the at-fault driver's insurer (third-party) is paying, sales tax on the replacement vehicle should be included in the settlement."},
+        {"q": "What if my insurer refuses to pay sales tax?", "a": "File a complaint with your state's Department of Insurance. In most states, failing to include sales tax violates fair claims settlement practices. You can also cite your state's specific regulation in a demand letter."},
+    ],
+    "settlement_checklist": [
+        {"q": "What should a total loss settlement include?", "a": "At minimum: the actual cash value (ACV) of your vehicle, sales tax on a replacement, title and registration fees, and any applicable state-specific items. Many offers also miss comparable vehicle adjustments, dealer fees, and loss of use compensation."},
+        {"q": "How do I know if my insurer used accurate comparable vehicles?", "a": "Request their valuation report. Check that comps match your vehicle's trim, mileage, condition, and options. If their comps have higher mileage or lower trim, your ACV should be adjusted upward."},
+        {"q": "Can I dispute missing line items?", "a": "Absolutely. Write a formal demand letter listing each missing item with dollar amounts and legal citations. Most adjusters have authority to increase offers by 10-15% without supervisor approval."},
+    ],
+    "fairness_quiz": [
+        {"q": "How is the fairness score calculated?", "a": "The score starts at 50 (they at least made an offer). Including sales tax adds 15 points. Each standard line item adds 7 points. Missing 3 or more items triggers an additional penalty. The maximum score is 100."},
+        {"q": "What score should I be aiming for?", "a": "A fair offer typically scores 75-100. Below 60 means several common line items are missing. Below 40 means your offer is likely thousands of dollars below fair value."},
+        {"q": "Is this score legally binding?", "a": "No. This is an educational estimate to help you understand whether your offer may be below fair value. For legal advice specific to your situation, consult an attorney."},
+    ],
+    "car_worth_estimator": [
+        {"q": "Which valuation source is most accurate?", "a": "Use multiple sources and average them. KBB, NADA, and Edmunds each use different methodologies. Having 2-3 independent valuations strengthens your negotiation position."},
+        {"q": "Why might my car be worth more than KBB says?", "a": "KBB uses national averages. Your local market, low mileage, excellent condition, desirable color, or aftermarket upgrades can all push the value higher. Regional supply shortages also affect prices."},
+    ],
+}
+
+_TOOL_META = {
+    "sales_tax_calculator": {
+        "title": "Sales Tax Recovery Calculator",
+        "description": "Calculate how much sales tax your insurer owes you on your total loss settlement. Free instant results for all 50 states.",
+        "slug": "sales-tax-calculator",
+    },
+    "settlement_checklist": {
+        "title": "Total Loss Settlement Checklist",
+        "description": "Check every line item that should be in your total loss settlement offer. See what's missing and how much you could be owed.",
+        "slug": "settlement-checklist",
+    },
+    "fairness_quiz": {
+        "title": "Is My Insurance Offer Fair?",
+        "description": "Answer 5 quick questions to find out if your total loss settlement is fair or if you're leaving money on the table.",
+        "slug": "fairness-quiz",
+    },
+    "car_worth_estimator": {
+        "title": "What's My Totaled Car Worth?",
+        "description": "Get an independent estimate of your totaled vehicle's value to compare against your insurer's offer.",
+        "slug": "car-worth-estimator",
+    },
+}
+
+
+@app.get("/api/tools/data")
+async def tools_data_api():
+    """JSON data for client-side tool widgets."""
+    return json.loads(_TOOL_DATA_JSON)
+
+
+@app.post("/api/tools/calculate-tax")
+async def calculate_tax_api(request: Request):
+    """Server-side sales tax calculation."""
+    body = await request.json()
+    result = calculate_sales_tax(
+        settlement_amount=float(body.get("amount", 0)),
+        state=body.get("state", ""),
+        keeping_vehicle=body.get("keeping_vehicle", False),
+        salvage_value=float(body.get("salvage_value", 0)),
+    )
+    return result
+
+
+@app.post("/api/tools/checklist")
+async def checklist_api(request: Request):
+    """Server-side checklist gap calculation."""
+    body = await request.json()
+    result = calculate_checklist_results(
+        checked_items=body.get("checked", []),
+        state=body.get("state", ""),
+        offer_amount=float(body.get("amount", 0)),
+    )
+    return result
+
+
+@app.post("/api/tools/fairness")
+async def fairness_api(request: Request):
+    """Server-side fairness score calculation."""
+    body = await request.json()
+    result = calculate_fairness_score(
+        state=body.get("state", ""),
+        offer_amount=float(body.get("amount", 0)),
+        includes_sales_tax=body.get("includes_tax", False),
+        included_items=body.get("included_items", []),
+    )
+    return result
+
+
+@app.get("/tools", response_class=HTMLResponse)
+async def tools_index(request: Request):
+    """Index page listing all interactive tools."""
+    html = """<!DOCTYPE html><html lang="en"><head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Free Insurance Settlement Tools | ClaimCoach</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+    body{margin:0;padding:0;font-family:'Inter',sans-serif;background:#f8fafc;color:#1e293b}
+    .wrap{max-width:720px;margin:60px auto;padding:0 24px}
+    h1{font-size:32px;font-weight:800;margin:0 0 8px}
+    .sub{color:#64748b;font-size:16px;margin:0 0 32px}
+    .card{display:block;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:24px;margin-bottom:16px;text-decoration:none;color:inherit;transition:box-shadow .15s}
+    .card:hover{box-shadow:0 4px 12px rgba(0,0,0,.08)}
+    .card h2{font-size:18px;font-weight:700;margin:0 0 6px;color:#0f172a}
+    .card p{font-size:14px;color:#64748b;margin:0}
+    .card .arrow{float:right;color:#2563eb;font-size:20px;font-weight:700}
+    </style></head><body><div class="wrap">
+    <h1>Free Settlement Tools</h1>
+    <p class="sub">Interactive calculators to help you understand your total loss settlement.</p>"""
+    for tool_id, meta in _TOOL_META.items():
+        html += f'<a class="card" href="/tools/{meta["slug"]}"><span class="arrow">&rarr;</span><h2>{meta["title"]}</h2><p>{meta["description"]}</p></a>'
+    html += "</div></body></html>"
+    return HTMLResponse(content=html)
+
+
+@app.get("/tools/{slug}", response_class=HTMLResponse)
+async def tool_page(request: Request, slug: str):
+    """Standalone full-version tool page."""
+    # Find tool by slug
+    tool_id = None
+    meta = None
+    for tid, m in _TOOL_META.items():
+        if m["slug"] == slug:
+            tool_id = tid
+            meta = m
+            break
+    if not tool_id:
+        raise HTTPException(status_code=404, detail="Tool not found")
+
+    return templates.TemplateResponse("tools/tool_page.html", {
+        "request": request,
+        "title": meta["title"],
+        "description": meta["description"],
+        "slug": slug,
+        "tool_id": tool_id,
+        "tool_data_json": _TOOL_DATA_JSON,
+        "faqs": _TOOL_FAQS.get(tool_id, []),
+        "state": "",
+        "year": datetime.now().year,
+    })
+
+
 if __name__ == "__main__":
     import argparse
     import os

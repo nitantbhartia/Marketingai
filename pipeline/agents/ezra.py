@@ -496,6 +496,9 @@ Article:
                 else:
                     html_content += cta_html_block
 
+        # Render interactive tool placeholders into widget HTML
+        html_content = self._render_tool_placeholders(html_content)
+
         template = Template("""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -518,6 +521,7 @@ Article:
     <meta name="twitter:description" content="{{ meta_description }}">
     {% if og_image %}<meta name="twitter:image" content="{{ og_image }}">{% endif %}
     <link rel="stylesheet" href="/styles.css">
+    {% if has_tools %}<link rel="stylesheet" href="/static/tools/tools.css">{% endif %}
 </head>
 <body>
     <header>
@@ -565,6 +569,10 @@ Article:
     <footer>
         <p>&copy; {{ year }} ClaimCoach. All rights reserved.</p>
     </footer>
+    {% if has_tools %}
+    <script id="cc-tool-data" type="application/json">{{ tool_data_json | safe }}</script>
+    <script src="/static/tools/tools.js"></script>
+    {% endif %}
 </body>
 </html>
 """)
@@ -579,6 +587,17 @@ Article:
 
         canonical_url = f"{self.site_url.rstrip('/')}/blog/{slug}"
 
+        # Check if article has embedded interactive tools
+        has_tools = "data-cc-tool" in html_content
+        tool_data_json = ""
+        if has_tools:
+            try:
+                from tools.data import export_tool_data_json
+                tool_data_json = export_tool_data_json()
+            except ImportError:
+                self.logger.warning("tools.data not available — skipping tool rendering")
+                has_tools = False
+
         html = template.render(
             meta_title=article.meta_title or article.title,
             meta_description=article.meta_description or "",
@@ -591,6 +610,8 @@ Article:
             secondary_cta=secondary_cta,
             newsletter_cta=newsletter_cta,
             year=datetime.now().year,
+            has_tools=has_tools,
+            tool_data_json=tool_data_json,
         )
 
         filepath = self.blog_dir / "html" / f"{slug}.html"
@@ -598,6 +619,34 @@ Article:
 
         self.logger.info(f"  Generated HTML: {filepath}")
         return filepath
+
+    @staticmethod
+    def _render_tool_placeholders(html_content: str) -> str:
+        """Replace <!-- TOOL:tool_id:mini --> placeholders with widget divs.
+
+        Quill embeds these comment-style placeholders during self-review.
+        Ezra converts them to real ``<div data-cc-tool="...">`` elements
+        that the client-side JS (tools.js) mounts on page load.
+        """
+        import re as _re
+
+        def _replace(m: _re.Match) -> str:
+            tool_id = m.group(1)
+            mode = m.group(2) or "mini"
+            rest = m.group(3) or ""
+            # Extract data-state if present
+            state_match = _re.search(r'data-state="([^"]*)"', rest)
+            state_attr = f' data-state="{state_match.group(1)}"' if state_match else ""
+            return (
+                f'<div data-cc-tool="{tool_id}" data-mode="{mode}"'
+                f'{state_attr}></div>'
+            )
+
+        return _re.sub(
+            r'<!--\s*TOOL:([\w]+):([\w]+)((?:\s+[^>]*)?)\s*-->',
+            _replace,
+            html_content,
+        )
 
     def _update_index(self, article, slug: str):
         """Update blog index with new article."""
