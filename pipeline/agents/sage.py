@@ -424,6 +424,8 @@ Article excerpt:
 
             return score, issues
 
+        except RateLimitError:
+            raise  # Let rate limits propagate — don't degrade the score
         except Exception as e:
             logger.warning(f"LLM originality check failed: {e}")
             return 14.0, [f"Originality check error (LLM): {e}"]
@@ -484,6 +486,8 @@ Article excerpt:
                 ai_issues = self._ai_fact_check(content, article)
                 issues.extend(ai_issues)
                 score -= len(ai_issues) * 2
+            except RateLimitError:
+                raise  # Let rate limits propagate — don't skip fact check
             except Exception as e:
                 logger.warning(f"AI fact check failed: {e}")
         else:
