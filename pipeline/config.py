@@ -42,12 +42,12 @@ class GeminiConfig:
     morgan_model: str = "gemini-2.5-flash"
     herald_model: str = "gemini-2.5-flash"
     lurker_model: str = "gemini-2.5-flash"
-    # Daily request budgets per tier
-    pro_daily_budget: int = 20
-    flash_daily_budget: int = 250
-    flash_lite_daily_budget: int = 1000
-    # Minimum seconds between API calls (free tier = 5 RPM → 12s)
-    rate_limit_delay: float = 12.0
+    # Daily request budgets per tier (paid tier — effectively unlimited)
+    pro_daily_budget: int = 1000
+    flash_daily_budget: int = 10000
+    flash_lite_daily_budget: int = 10000
+    # Minimum seconds between API calls (paid tier = 2000 RPM)
+    rate_limit_delay: float = 0.5
     # Enable Google Search grounding for Pro calls (insurance law freshness)
     search_grounding: bool = True
 
