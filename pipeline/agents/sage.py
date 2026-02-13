@@ -170,14 +170,37 @@ class SageAgent(BaseAgent):
         read_report = readability_report(content)
         read_score = 0.0
         read_issues = read_report["issues"]
+        # Flesch-Kincaid (5 pts)
         if read_report["flesch_kincaid"] >= 60:
-            read_score += 10
+            read_score += 5
         elif read_report["flesch_kincaid"] >= 50:
-            read_score += 5
-        if read_report["avg_sentence_length"] <= 25:
-            read_score += 5
-        elif read_report["avg_sentence_length"] <= 30:
             read_score += 2.5
+        # Sentence length (3 pts)
+        if read_report["avg_sentence_length"] <= 25:
+            read_score += 3
+        elif read_report["avg_sentence_length"] <= 30:
+            read_score += 1.5
+        # Passive voice (3 pts) — target ≤15%
+        if read_report["passive_voice_ratio"] <= 0.10:
+            read_score += 3
+        elif read_report["passive_voice_ratio"] <= 0.15:
+            read_score += 2
+        elif read_report["passive_voice_ratio"] <= 0.25:
+            read_score += 1
+        # Transition words (2 pts) — target ≥25%
+        if read_report["transition_word_score"] >= 0.30:
+            read_score += 2
+        elif read_report["transition_word_score"] >= 0.25:
+            read_score += 1.5
+        elif read_report["transition_word_score"] >= 0.15:
+            read_score += 0.5
+        # Sentence variety (2 pts) — target CV ≥0.40
+        if read_report["sentence_length_variety"] >= 0.50:
+            read_score += 2
+        elif read_report["sentence_length_variety"] >= 0.40:
+            read_score += 1.5
+        elif read_report["sentence_length_variety"] >= 0.30:
+            read_score += 0.5
         scores["readability"] = {"score": read_score, "max": 15, "issues": read_issues}
         total_score += read_score
         all_issues.extend(read_issues)

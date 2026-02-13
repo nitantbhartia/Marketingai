@@ -253,10 +253,33 @@ class QuillAgent(BaseAgent):
 
         article = self.db.get_article(article_id)
         if article is None:
+            self.db.update_article(article_id, writer_claim="")
             return {"status": "error", "reason": "article_not_found"}
 
         logger.info(f"Writing article: {article.target_keyword} (revision={is_revision})")
 
+        try:
+            return self._write_one_inner(article, article_id, is_revision)
+        except RateLimitError as e:
+            logger.warning(f"Rate limited during pre-draft of article {article_id}: {e}")
+            self.db.update_article(article_id, writer_claim="")
+            self.db.record_metric("rate_limit", 0, json.dumps({
+                "agent": "quill", "article_id": article_id, "phase": "pre_draft",
+            }))
+            return {"status": "rate_limited", "article_id": article_id, "reason": str(e)}
+        except Exception as e:
+            logger.error(f"Unexpected error writing article {article_id}: {e}", exc_info=True)
+            rollback_status = (
+                ArticleStatus.REVISION.value if is_revision
+                else ArticleStatus.TODO.value
+            )
+            self.db.update_article(
+                article_id, status=rollback_status, writer_claim=""
+            )
+            return {"status": "error", "article_id": article_id, "reason": str(e)}
+
+    def _write_one_inner(self, article, article_id: int, is_revision: bool) -> dict[str, Any]:
+        """Inner write logic — caller guarantees claim release on exception."""
         # Load context documents
         product_context = self.config.load_product_context()
         state_rules = self.config.load_state_rules()
