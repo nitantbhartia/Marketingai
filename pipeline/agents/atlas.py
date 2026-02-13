@@ -107,15 +107,40 @@ class Atlas(Agent):
                 results["insights_generated"] += 1
                 results["recommendations"].append(insight["text"])
 
-        # 4. Log activity
+        # 4. Bridge insights into the pipeline lesson system so Scout and
+        # Quill can actually act on performance patterns.
+        for insight in insights:
+            if insight["confidence"] >= self.min_confidence_score:
+                self._record_pipeline_lesson(insight)
+
+        # 5. Log activity
         log_agent_action(
             agent_name=self.name,
             action="analysis_complete",
             details=results
         )
 
-        self.log(f"✓ Analysis complete: {results['insights_generated']} insights generated")
+        self.log(f"Analysis complete: {results['insights_generated']} insights generated")
         return results
+
+    def _record_pipeline_lesson(self, insight: Dict[str, Any]) -> None:
+        """Bridge Atlas insights into the pipeline lesson DB.
+
+        Without this, insights are written to content_quality.db tables
+        that Scout/Quill never read.  By recording them as lessons,
+        the feedback loop actually closes.
+        """
+        try:
+            from pipeline.db import Database
+            db = Database()
+            text = insight["text"]
+            # Route to the agents that can act on this
+            if any(kw in insight["type"] for kw in ("word_count", "seo", "structure")):
+                db.upsert_lesson("atlas", "quill", "performance", text)
+            if any(kw in insight["type"] for kw in ("state", "keyword", "category")):
+                db.upsert_lesson("atlas", "scout", "performance", text)
+        except Exception:
+            pass  # Don't break Atlas if pipeline DB is unavailable
 
     def _identify_top_performers(self, articles: List[Dict]) -> List[Dict]:
         """Identify articles in top 3 positions or with high engagement."""

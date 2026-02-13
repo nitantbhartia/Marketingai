@@ -44,7 +44,10 @@ class HeraldAgent(BaseAgent):
         done_articles = self.db.query_articles(
             status=ArticleStatus.DONE.value, limit=20
         )
-        unpromoted = [a for a in done_articles if not a.social_status]
+        unpromoted = [
+            a for a in done_articles
+            if not a.social_status and a.published_url and a.markdown_content
+        ]
 
         if not unpromoted:
             logger.info("No articles to promote")
@@ -165,7 +168,7 @@ genuinely helpful, never spammy. We're sharing a useful resource, not selling.
 Article Title: {article.title}
 Article URL: {article.published_url}
 Keyword: {article.target_keyword}
-Summary (first 500 chars): {article.markdown_content[:500]}
+Summary (first 500 chars): {(article.meta_description + ' ' if article.meta_description else '') + (article.markdown_content or '')[:500]}
 {lesson_section}
 Generate posts for:
 

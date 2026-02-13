@@ -93,6 +93,11 @@ class Remix(Agent):
 
             results["articles_processed"] += 1
 
+        # Bridge remix results into the pipeline lesson system so Quill
+        # learns which content structures repurpose well.
+        if results["remixes_created"] > 0:
+            self._record_pipeline_lessons(results)
+
         # Log activity
         log_agent_action(
             agent_name=self.name,
@@ -100,8 +105,23 @@ class Remix(Agent):
             details=results
         )
 
-        self.log(f"✓ Remix complete: {results['remixes_created']} variations created")
+        self.log(f"Remix complete: {results['remixes_created']} variations created")
         return results
+
+    def _record_pipeline_lessons(self, results: Dict[str, Any]) -> None:
+        """Bridge remix stats into the pipeline lesson DB."""
+        try:
+            from pipeline.db import Database
+            db = Database()
+            for remix_type, count in results.get("by_type", {}).items():
+                if count > 0:
+                    db.upsert_lesson(
+                        "remix", "quill", "repurpose_friendly",
+                        f"{remix_type} remixes generated ({count} this run) — "
+                        f"structure content with clear sections for easy repurposing",
+                    )
+        except Exception:
+            pass  # Don't break Remix if pipeline DB is unavailable
 
     def _generate_remix(self, article: Dict[str, Any], remix_type: str) -> Dict[str, Any]:
         """

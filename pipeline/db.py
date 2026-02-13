@@ -371,6 +371,13 @@ class Database:
         return self._row_to_article(row)
 
     def update_article(self, article_id: int, **kwargs) -> Article | None:
+        valid = _get_article_fields()
+        invalid = set(kwargs.keys()) - valid - {"updated_at"}
+        if invalid:
+            raise ValueError(
+                f"update_article(): unknown fields {invalid}. "
+                f"Valid fields: {sorted(valid)}"
+            )
         kwargs["updated_at"] = self._now()
         sets = ", ".join(f"{k} = ?" for k in kwargs)
         vals = list(kwargs.values()) + [article_id]
