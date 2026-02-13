@@ -1053,3 +1053,212 @@ class TestEdgeCases:
             # Should have deduped
             lower_searches = [s.lower() for s in insight.related_searches]
             assert lower_searches.count("total loss settlement") <= 1
+
+
+# ===========================================================================
+# 9. Sage — hard-reject for critical violations
+# ===========================================================================
+
+class TestSageCriticalViolationReject:
+    """Test that critical violations (legal, product, state) fast-track rejection.
+
+    Critical violations get max 2 revision rounds instead of 5, and block
+    approval even if the score is above threshold.
+    """
+
+    def setup_method(self):
+        self.db = _make_db()
+        cfg = _make_config()
+        cfg.gemini.api_key = "test-key"
+        cfg.llm_provider = "gemini"
+        self.cfg = cfg
+
+    def _create_article(self, content: str, revision_count: int = 0, **kwargs) -> Article:
+        defaults = dict(
+            title="Test Article",
+            target_keyword="total loss settlement",
+            status=ArticleStatus.EDITOR_REVIEW.value,
+            markdown_content=content,
+            meta_description="Test meta about total loss settlement.",
+            content_category="problem_aware",
+        )
+        defaults.update(kwargs)
+        article = self.db.create_article(**defaults)
+        if revision_count > 0:
+            self.db.update_article(article.id, revision_count=revision_count)
+        return self.db.get_article(article.id)
+
+    def _review(self, article) -> dict:
+        from pipeline.agents.sage import SageAgent
+
+        sage = SageAgent(self.cfg, self.db)
+        sage._calibration = {
+            "word_count_target": (1800, 2200),
+            "word_count_ok": (1500, 2500),
+        }
+
+        # Mock LLM calls to avoid needing real API
+        with patch.object(sage, "_check_plagiarism", return_value=(18.0, [])), \
+             patch.object(sage, "_reuse_plagiarism_score", return_value=(18.0, ["reused"])), \
+             patch.object(sage, "_check_facts", return_value=(18.0, [])):
+            return sage._review_article(article)
+
+    def test_legal_violation_rejected_after_2_rounds(self):
+        """Article with legal violations should be rejected after 2 rounds, not 5."""
+        # Content with a flagged phrase (legal_score = 0)
+        content = (
+            "## Total Loss Settlement Guide\n\n"
+            "ClaimCoach will get you more money for your total loss claim. "
+            "You are legally entitled to fair compensation.\n"
+        )
+        article = self._create_article(content, revision_count=2)
+        result = self._review(article)
+
+        assert result["decision"] == "rejected"
+        updated = self.db.get_article(article.id)
+        assert updated.status == ArticleStatus.REJECTED.value
+        assert "Critical violation" in updated.revision_notes or "CRITICAL" in (updated.revision_notes or "")
+
+    def test_legal_violation_gets_revision_on_round_0(self):
+        """First encounter of legal violation should give revision, not instant reject."""
+        content = (
+            "## Total Loss Guide\n\n"
+            "ClaimCoach will get you more money guaranteed.\n"
+        )
+        article = self._create_article(content, revision_count=0)
+        result = self._review(article)
+
+        assert result["decision"] == "revision"
+        updated = self.db.get_article(article.id)
+        assert updated.status == ArticleStatus.REVISION.value
+        # Should have CRITICAL warning in notes
+        assert "CRITICAL" in (updated.revision_notes or "")
+
+    def test_legal_violation_gets_revision_on_round_1(self):
+        """Second round with legal violation should still give revision (max 2)."""
+        content = (
+            "## Guide\n\n"
+            "We guarantee results for every claim.\n"
+        )
+        article = self._create_article(content, revision_count=1)
+        result = self._review(article)
+
+        assert result["decision"] == "revision"
+
+    def test_legal_violation_rejected_on_round_2(self):
+        """Third round (revision_count=2) with legal violation should reject."""
+        content = (
+            "## Guide\n\n"
+            "We guarantee results for every claim.\n"
+        )
+        article = self._create_article(content, revision_count=2)
+        result = self._review(article)
+
+        assert result["decision"] == "rejected"
+
+    def test_clean_article_not_rejected_at_round_2(self):
+        """Article without critical violations should still get revisions at round 2."""
+        content = (
+            "## Total Loss Settlement Guide\n\n"
+            "When your car is totaled, you need to understand how to negotiate "
+            "a fair total loss settlement value with your insurance company.\n"
+        )
+        article = self._create_article(content, revision_count=2)
+        result = self._review(article)
+
+        # No critical violations, so should NOT be rejected at round 2
+        assert result["decision"] in ("revision", "approved")
+        if result["decision"] == "revision":
+            updated = self.db.get_article(article.id)
+            assert updated.status == ArticleStatus.REVISION.value
+
+    def test_critical_blocks_approval_even_with_high_score(self):
+        """Even if score >= threshold, critical violations must block approval."""
+        from pipeline.agents.sage import SageAgent
+
+        sage = SageAgent(self.cfg, self.db)
+        sage._calibration = {
+            "word_count_target": (100, 5000),
+            "word_count_ok": (50, 10000),
+        }
+
+        # Content with legal violation but otherwise "good" (high mock scores)
+        content = (
+            "## Total Loss Settlement Guide\n\n"
+            "You are legally entitled to fair compensation. "
+            "ClaimCoach helps you understand your total loss settlement.\n"
+        )
+        article = self._create_article(content, revision_count=0)
+
+        # Mock everything to return high scores so total would pass threshold
+        with patch.object(sage, "_check_plagiarism", return_value=(20.0, [])), \
+             patch.object(sage, "_check_facts", return_value=(20.0, [])):
+            result = sage._review_article(article)
+
+        # Should NOT be approved despite high scores — legal violation present
+        assert result["decision"] != "approved"
+
+    def test_product_compliance_fail_triggers_critical(self):
+        """Product compliance FAIL should trigger the critical path."""
+        from pipeline.agents.sage import SageAgent
+        from content_quality.validators.product_validator import ProductClaimValidator
+
+        sage = SageAgent(self.cfg, self.db)
+        sage._calibration = {
+            "word_count_target": (1800, 2200),
+            "word_count_ok": (1500, 2500),
+        }
+
+        content = (
+            "## Using ClaimCoach\n\n"
+            "ClaimCoach negotiates on your behalf with the insurance company. "
+            "Upload your settlement letter and our AI reviews your policy.\n"
+        )
+        article = self._create_article(content, revision_count=2)
+
+        with patch.object(sage, "_check_plagiarism", return_value=(18.0, [])), \
+             patch.object(sage, "_check_facts", return_value=(15.0, [])):
+            result = sage._review_article(article)
+
+        # Should be rejected — product compliance FAIL + round 2 = hard reject
+        assert result["decision"] == "rejected"
+
+    def test_critical_rejection_notes_include_reason(self):
+        """Rejected articles should have specific reason in notes."""
+        content = (
+            "## Guide\n\n"
+            "ClaimCoach will get you more money guaranteed.\n"
+        )
+        article = self._create_article(content, revision_count=2)
+        self._review(article)
+
+        updated = self.db.get_article(article.id)
+        notes = updated.revision_notes or ""
+        assert "REJECTED" in notes
+        assert "legal compliance" in notes.lower() or "critical" in notes.lower()
+
+    def test_standard_article_gets_5_rounds(self):
+        """Non-critical articles should still get the full 5 rounds."""
+        content = (
+            "## Short Guide\n\n"
+            "This is a brief article about total loss.\n"
+        )
+        # At round 4 (0-indexed), should still get revision (not rejected)
+        article = self._create_article(content, revision_count=4)
+        result = self._review(article)
+
+        # Score will be low but no critical violations → revision at round 4
+        assert result["decision"] == "revision"
+
+    def test_standard_article_rejected_at_round_5(self):
+        """Non-critical articles should be rejected at round 5."""
+        content = (
+            "## Short Guide\n\n"
+            "This is a brief article about total loss.\n"
+        )
+        article = self._create_article(content, revision_count=5)
+        result = self._review(article)
+
+        assert result["decision"] == "rejected"
+        updated = self.db.get_article(article.id)
+        assert "Maximum revision rounds exceeded" in (updated.revision_notes or "")
