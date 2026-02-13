@@ -133,11 +133,9 @@ class SageAgent(BaseAgent):
 
         content = article.markdown_content or ""
 
-        # 1. Plagiarism check (20 pts) — only on first review, reuse on revisions
-        if article.revision_count > 0:
-            plag_score, plag_issues = self._reuse_plagiarism_score(article)
-        else:
-            plag_score, plag_issues = self._check_plagiarism(content, article)
+        # 1. Plagiarism check (20 pts) — always re-check because full rewrites
+        # produce entirely new content that needs fresh originality scoring.
+        plag_score, plag_issues = self._check_plagiarism(content, article)
         scores["plagiarism"] = {"score": plag_score, "max": 20, "issues": plag_issues}
         total_score += plag_score
         all_issues.extend(plag_issues)
