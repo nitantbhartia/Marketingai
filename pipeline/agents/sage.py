@@ -13,6 +13,7 @@ from typing import Any
 
 import requests
 
+from content_quality.validators.math_validator import MathValidator
 from content_quality.validators.product_validator import ProductClaimValidator
 from content_quality.validators.state_validator import StateRegulationValidator
 from pipeline.agents.base import BaseAgent, RateLimitError
@@ -143,14 +144,29 @@ class SageAgent(BaseAgent):
 
         content = article.markdown_content or ""
 
-        # 1. Plagiarism check (20 pts) — always re-check because full rewrites
-        # produce entirely new content that needs fresh originality scoring.
+        # ── 100-POINT RUBRIC (10 categories) ──
+        #
+        # Plagiarism:          17 pts
+        # SEO:                 18 pts
+        # Readability:         15 pts  (8 sub-metrics)
+        # Factual + Math:      18 pts  (AI/regex + math validator)
+        # Internal links:       8 pts
+        # Word count:           4 pts
+        # CTA:                  5 pts  (placement-aware)
+        # Legal compliance:     5 pts
+        # Media & Formatting:  10 pts  (NEW: images, scanability, schema)
+        # ────────────────────────────
+        # Total:              100 pts
+
+        # 1. Plagiarism check (17 pts)
         plag_score, plag_issues = self._check_plagiarism(content, article)
-        scores["plagiarism"] = {"score": plag_score, "max": 20, "issues": plag_issues}
+        # Scale: plagiarism checks return 0-20, normalize to 0-17
+        plag_score = round(plag_score * 17 / 20, 1)
+        scores["plagiarism"] = {"score": plag_score, "max": 17, "issues": plag_issues}
         total_score += plag_score
         all_issues.extend(plag_issues)
 
-        # 2. SEO score (20 pts)
+        # 2. SEO score (18 pts)
         internal_links, external_links = extract_links(content)
         has_faq = detect_faq_section(content)
         seo_raw, seo_issues = score_seo(
@@ -162,8 +178,10 @@ class SageAgent(BaseAgent):
             external_links=external_links,
             has_faq=has_faq,
         )
-        scores["seo"] = {"score": seo_raw, "max": 20, "issues": seo_issues}
-        total_score += seo_raw
+        # Scale: score_seo returns 0-20, normalize to 0-18
+        seo_scaled = round(seo_raw * 18 / 20, 1)
+        scores["seo"] = {"score": seo_scaled, "max": 18, "issues": seo_issues}
+        total_score += seo_scaled
         all_issues.extend(seo_issues)
 
         # 3. Readability (15 pts — 8 sub-metrics)
@@ -223,13 +241,20 @@ class SageAgent(BaseAgent):
         total_score += read_score
         all_issues.extend(read_issues)
 
-        # 4. Factual accuracy (20 pts) — AI check if available, rule-based otherwise
+        # 4. Factual + Math accuracy (18 pts)
+        # 4a. Factual claims (15 pts from AI/regex)
         fact_score, fact_issues = self._check_facts(content, article)
-        scores["factual_accuracy"] = {"score": fact_score, "max": 20, "issues": fact_issues}
-        total_score += fact_score
-        all_issues.extend(fact_issues)
+        # Scale: _check_facts returns 0-20, normalize to 0-15
+        fact_score = round(min(fact_score, 20.0) * 15 / 20, 1)
+        # 4b. Math accuracy (3 pts from MathValidator)
+        math_score, math_issues = self._check_math(content)
+        fact_total = fact_score + math_score
+        all_fact_issues = fact_issues + math_issues
+        scores["factual_accuracy"] = {"score": fact_total, "max": 18, "issues": all_fact_issues}
+        total_score += fact_total
+        all_issues.extend(all_fact_issues)
 
-        # 5. Internal links valid (10 pts)
+        # 5. Internal links valid (8 pts)
         link_score = 0.0
         link_issues = []
         published = self.db.get_published_articles()
@@ -238,49 +263,46 @@ class SageAgent(BaseAgent):
         if internal_links:
             valid = 0
             for link in internal_links:
-                # Check if the link matches a published article
                 if link in published_urls or any(s in link for s in published_slugs):
                     valid += 1
             if len(internal_links) > 0 and valid == len(internal_links):
-                link_score = 10
+                link_score = 8
             elif valid > 0:
-                link_score = 5
+                link_score = 4
                 link_issues.append(f"{len(internal_links) - valid} internal links point to unpublished articles")
             elif len(published) <= 3:
-                # Grace period: links exist but nothing is published yet
-                link_score = 8
+                link_score = 6
                 link_issues.append("Internal links present but no published articles to validate against (grace period)")
             else:
                 link_issues.append("Internal links don't match published articles")
         else:
-            # No internal links at all
             if len(published) > 3:
                 link_issues.append("No internal links (published articles available)")
             else:
-                link_score = 8  # Grace period when few articles published
+                link_score = 6
                 link_issues.append("No internal links (few published articles — grace period)")
-        scores["internal_links"] = {"score": link_score, "max": 10, "issues": link_issues}
+        scores["internal_links"] = {"score": link_score, "max": 8, "issues": link_issues}
         total_score += link_score
         all_issues.extend(link_issues)
 
-        # 6. Word count (5 pts) — calibrated from GSC performance data
+        # 6. Word count (4 pts) — calibrated from GSC performance data
         wc = word_count(content)
         wc_score = 0.0
         wc_issues = []
         target_lo, target_hi = self._calibration.get("word_count_target", (1800, 2200))
         ok_lo, ok_hi = self._calibration.get("word_count_ok", (1500, 2500))
         if target_lo <= wc <= target_hi:
-            wc_score = 5
+            wc_score = 4
         elif ok_lo <= wc <= ok_hi:
-            wc_score = 3
+            wc_score = 2
             wc_issues.append(f"Word count {wc} (target: {target_lo}-{target_hi})")
         else:
             wc_issues.append(f"Word count {wc} far from target ({target_lo}-{target_hi})")
-        scores["word_count"] = {"score": wc_score, "max": 5, "issues": wc_issues}
+        scores["word_count"] = {"score": wc_score, "max": 4, "issues": wc_issues}
         total_score += wc_score
         all_issues.extend(wc_issues)
 
-        # 7. CTA present (5 pts)
+        # 7. CTA quality (5 pts — placement-aware)
         cta_score, cta_issues = self._check_cta(content)
         scores["cta"] = {"score": cta_score, "max": 5, "issues": cta_issues}
         total_score += cta_score
@@ -291,6 +313,12 @@ class SageAgent(BaseAgent):
         scores["legal_compliance"] = {"score": legal_score, "max": 5, "issues": legal_issues}
         total_score += legal_score
         all_issues.extend(legal_issues)
+
+        # 9. Media & Formatting (10 pts — NEW)
+        media_score, media_issues = self._check_media_and_formatting(read_report)
+        scores["media_formatting"] = {"score": media_score, "max": 10, "issues": media_issues}
+        total_score += media_score
+        all_issues.extend(media_issues)
 
         # 9. State regulation accuracy
         state_validator = StateRegulationValidator()
@@ -332,7 +360,7 @@ class SageAgent(BaseAgent):
         update_kwargs = {
             "status": new_status,
             "sage_score": total_score,
-            "seo_score": seo_raw,
+            "seo_score": seo_scaled,
             "readability_score": read_report["flesch_kincaid"],
             "word_count": wc,
             "editor_claim": "",  # Always release Sage's claim after decision
@@ -592,22 +620,162 @@ Format each issue on its own line starting with "- "."""
         return issues
 
     def _check_cta(self, content: str) -> tuple[float, list[str]]:
-        """Check for ClaimCoach CTA."""
-        issues = []
+        """Check for ClaimCoach CTA — placement-aware scoring.
+
+        Scores for presence, link, and strategic placement:
+        - Mention exists (1 pt)
+        - Link to claimcoach.app (1 pt)
+        - CTA in closing section (1 pt)
+        - Mid-article mention or CTA (1 pt)
+        - Benefit-driven CTA copy, not just brand mention (1 pt)
+        """
+        issues: list[str] = []
         score = 0.0
 
         content_lower = content.lower()
+        lines = content.split("\n")
+
+        # 1 pt: ClaimCoach mentioned at all
         if "claimcoach" in content_lower:
-            score += 2.5
+            score += 1
         else:
             issues.append("No mention of ClaimCoach")
+            return score, issues  # No CTA at all — remaining checks moot
 
+        # 1 pt: Link to claimcoach.app
         if "claimcoach.app" in content_lower:
-            score += 2.5
+            score += 1
         else:
             issues.append("No link to claimcoach.app")
 
+        # 1 pt: CTA in closing section (last 20% of article)
+        total_chars = len(content)
+        closing_start = int(total_chars * 0.8)
+        closing_section = content_lower[closing_start:]
+        if "claimcoach" in closing_section:
+            score += 1
+        else:
+            issues.append("No ClaimCoach CTA in closing section (last 20% of article)")
+
+        # 1 pt: Mid-article mention (between 25%-75% of article)
+        mid_start = int(total_chars * 0.25)
+        mid_end = int(total_chars * 0.75)
+        mid_section = content_lower[mid_start:mid_end]
+        if "claimcoach" in mid_section:
+            score += 1
+        else:
+            issues.append("No mid-article ClaimCoach mention (add subtle reference in body)")
+
+        # 1 pt: Benefit-driven CTA copy (not just brand name)
+        benefit_patterns = [
+            r"claimcoach\s+(?:analyzes?|shows?|helps?|identifies?|checks?)",
+            r"(?:try|use|check out|visit|get started with)\s+claimcoach",
+            r"claimcoach\.app\)?\s*(?:to|and|—|–|-)\s+\w+",
+        ]
+        has_benefit = any(
+            re.search(p, content_lower) for p in benefit_patterns
+        )
+        if has_benefit:
+            score += 1
+        else:
+            issues.append("CTA mentions ClaimCoach but lacks benefit copy (explain what it does for the reader)")
+
         return score, issues
+
+    @staticmethod
+    def _check_math(content: str) -> tuple[float, list[str]]:
+        """Validate math claims using MathValidator (3 pts).
+
+        AI frequently botches arithmetic when calculating sales tax,
+        settlement examples, or line item totals.
+        """
+        try:
+            validator = MathValidator()
+            result = validator.validate(content)
+            issues = [
+                f"[Math Error] {i['message']}" for i in result.get("issues", [])
+            ]
+            error_count = result.get("error_count", 0)
+            if error_count == 0:
+                return 3.0, []
+            elif error_count == 1:
+                return 1.5, issues
+            else:
+                return 0.0, issues
+        except Exception as e:
+            logger.warning(f"Math validation failed: {e}")
+            return 2.0, [f"Math validation error: {e}"]
+
+    @staticmethod
+    def _check_media_and_formatting(read_report: dict) -> tuple[float, list[str]]:
+        """Score media presence and content formatting (10 pts).
+
+        Sub-scores:
+        - Image placeholders present (3 pts)
+        - Image alt text quality (1 pt)
+        - Scanability: lists & bold terms (3 pts)
+        - FAQPage JSON-LD schema (2 pts)
+        - Blockquote callouts (1 pt)
+        """
+        score = 0.0
+        issues: list[str] = []
+
+        # ── Images (3 pts for presence + 1 pt for alt text quality) ──
+        images = read_report.get("image_coverage", {})
+        img_count = images.get("image_count", 0)
+        if img_count >= 3:
+            score += 3
+        elif img_count >= 2:
+            score += 2
+        elif img_count >= 1:
+            score += 1
+        else:
+            issues.append("No image placeholders (add 2-4 images with descriptive alt text)")
+
+        # Alt text quality
+        empty_alts = images.get("empty_alt_count", 0)
+        short_alts = images.get("short_alt_count", 0)
+        if img_count > 0 and empty_alts == 0 and short_alts == 0:
+            score += 1
+        elif img_count > 0 and empty_alts > 0:
+            issues.append(f"{empty_alts} image(s) missing alt text — add descriptive, keyword-rich alt")
+
+        # ── Scanability (3 pts) ──
+        scan = read_report.get("scanability", {})
+        scan_raw = scan.get("score", 0)
+        # scan_raw is 0.0-2.0 scale, map to 0-3 pts
+        if scan_raw >= 1.5:
+            score += 3
+        elif scan_raw >= 1.0:
+            score += 2
+        elif scan_raw >= 0.5:
+            score += 1
+        else:
+            issues.append("Low scanability — add more bullet lists, bold key terms, and visual breaks")
+
+        # ── FAQPage JSON-LD schema (2 pts) ──
+        faq = read_report.get("faq_schema", {})
+        if faq.get("has_json_ld"):
+            if not faq.get("issues"):
+                score += 2
+            else:
+                score += 1
+                issues.extend(faq["issues"])
+        elif faq.get("has_faq_section"):
+            issues.append("FAQ section exists but no FAQPage JSON-LD schema — missing rich snippet opportunity")
+        else:
+            issues.append("No FAQ section or FAQPage schema")
+
+        # ── Blockquote callouts (1 pt) ──
+        blockquotes = scan.get("blockquotes", 0)
+        if blockquotes >= 2:
+            score += 1
+        elif blockquotes >= 1:
+            score += 0.5
+        else:
+            issues.append("No blockquote callouts — add Adjuster Insider tips for engagement")
+
+        return round(score, 1), issues
 
     def _check_legal_compliance(self, content: str) -> tuple[float, list[str]]:
         """Check for unauthorized legal advice."""

@@ -61,6 +61,22 @@ car owners navigate the nightmare of lowball total loss insurance settlements.
 - Include specific dollar amounts, ranges, and real data where possible
 - End with clear CTA pointing to ClaimCoach
 
+### Image Placeholders (REQUIRED — 2-4 per article)
+Include 2-4 image placeholders throughout the article using this format:
+  ![Descriptive alt text with keyword](image:short-slug-description)
+Rules:
+- Alt text MUST be descriptive (10+ words) and include the target keyword or a close variant
+- Place images where visual context would help the reader (diagrams, examples, comparisons)
+- Distribute images evenly — don't cluster them all at the top
+- Good: ![Chart showing average total loss settlement amounts by state for 2024](image:settlement-amounts-by-state)
+- Bad: ![image](image:img1) — this is useless for SEO and accessibility
+
+### Scanability (REQUIRED)
+- Use bullet or numbered lists in at least 2-3 sections (readers scan, not read)
+- Bold **key terms** and **important numbers** so scanners catch them
+- Use tables for comparisons or structured data when appropriate
+- Every H2 section should have at least one visual break (list, callout, bold term, or image)
+
 ### SEO Requirements
 - Target keyword in: title, first paragraph, at least 2 H2s, meta description
 - 2-3 external links to authoritative sources (state DOI websites, NAIC, etc.)
@@ -1010,7 +1026,23 @@ Article:
             content = re.sub(r"  +", " ", content)
             fixes.append(f"removed_{ai_ism_count}_ai_isms")
 
-        # Check 7: Internal links — inject links to published articles if missing.
+        # Check 7: FAQPage JSON-LD — convert FAQ H3 questions into structured data
+        # for Google rich snippet eligibility (15-25% CTR boost).
+        if detect_faq_section(content) and "FAQPage" not in content:
+            faq_json_ld = self._generate_faq_json_ld(content)
+            if faq_json_ld:
+                content += "\n\n" + faq_json_ld
+                fixes.append("added_faqpage_json_ld")
+
+        # Check 8: Image placeholders — inject if Quill didn't generate enough
+        image_matches = re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", content)
+        if len(image_matches) < 2:
+            content = self._inject_image_placeholders(content, article)
+            new_count = len(re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", content))
+            if new_count > len(image_matches):
+                fixes.append(f"injected_{new_count - len(image_matches)}_image_placeholders")
+
+        # Check 9: Internal links — inject links to published articles if missing.
         # This directly impacts Sage scoring: SEO internal_links (3pts) +
         # Sage internal_links category (10pts) = 13pts at stake.
         internal, external = extract_links(content)
@@ -1170,6 +1202,127 @@ Article:
 
             # If no anchor found in text, skip (don't force-insert)
         return content
+
+    @staticmethod
+    def _generate_faq_json_ld(content: str) -> str:
+        """Extract FAQ H3 questions/answers and produce FAQPage JSON-LD.
+
+        Parses the markdown FAQ section and converts Q&A pairs into the
+        schema.org FAQPage format that Google uses for rich snippets.
+        """
+        import json as _json
+
+        # Find FAQ section and extract Q&A pairs
+        faq_match = re.search(
+            r"^##\s+.*(?:FAQ|Frequently Asked|Common Questions).*$",
+            content, re.MULTILINE | re.IGNORECASE,
+        )
+        if not faq_match:
+            return ""
+
+        faq_text = content[faq_match.end():]
+        # Stop at next H2
+        next_h2 = re.search(r"^##\s+", faq_text, re.MULTILINE)
+        if next_h2:
+            faq_text = faq_text[:next_h2.start()]
+
+        # Parse ### Question? / Answer pairs
+        pairs: list[dict] = []
+        questions = re.split(r"^###\s+", faq_text, flags=re.MULTILINE)
+        for q_block in questions:
+            q_block = q_block.strip()
+            if not q_block:
+                continue
+            lines = q_block.split("\n", 1)
+            question = lines[0].strip().rstrip("?") + "?"
+            answer = lines[1].strip() if len(lines) > 1 else ""
+            # Clean markdown from answer
+            answer = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", answer)
+            answer = re.sub(r"[*_`]", "", answer)
+            answer = answer.strip()
+            if question and answer and len(answer) > 20:
+                pairs.append({
+                    "@type": "Question",
+                    "name": question,
+                    "acceptedAnswer": {
+                        "@type": "Answer",
+                        "text": answer,
+                    },
+                })
+
+        if len(pairs) < 2:
+            return ""
+
+        schema = {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": pairs,
+        }
+
+        json_str = _json.dumps(schema, indent=2)
+        return f'<script type="application/ld+json">\n{json_str}\n</script>'
+
+    @staticmethod
+    def _inject_image_placeholders(content: str, article) -> str:
+        """Inject image placeholders into sections that lack visual breaks.
+
+        Places descriptive image placeholders after the first paragraph of
+        H2 sections that don't already contain images, lists, or tables.
+        """
+        keyword = article.target_keyword or "insurance claim"
+        slug_keyword = re.sub(r"\s+", "-", keyword.lower())[:30]
+
+        sections = re.split(r"(^##\s+.+$)", content, flags=re.MULTILINE)
+        injected = 0
+        max_inject = 3
+        result_parts: list[str] = []
+
+        # Image descriptions keyed to common section themes
+        image_hints = [
+            (r"step|how to|process|guide", f"Step-by-step diagram showing the {keyword} process"),
+            (r"value|worth|amount|cost|money", f"Chart comparing typical {keyword} amounts and ranges"),
+            (r"example|case|scenario|story", f"Example breakdown of a real {keyword} case with numbers"),
+            (r"state|law|regulation|statute", f"Map showing {keyword} regulations by state"),
+            (r"compare|vs|versus|difference", f"Side-by-side comparison table for {keyword} options"),
+        ]
+        default_alt = f"Infographic explaining key factors in {keyword}"
+
+        for i, part in enumerate(sections):
+            result_parts.append(part)
+            # Only inject after H2 headings
+            if not re.match(r"^##\s+", part, re.MULTILINE):
+                continue
+            if injected >= max_inject:
+                continue
+            # Check if the next section already has an image
+            next_section = sections[i + 1] if i + 1 < len(sections) else ""
+            if re.search(r"!\[", next_section):
+                continue
+
+            # Pick alt text based on section heading
+            heading_lower = part.lower()
+            alt_text = default_alt
+            for pattern, hint in image_hints:
+                if re.search(pattern, heading_lower):
+                    alt_text = hint
+                    break
+
+            slug = f"image:{slug_keyword}-{injected + 1}"
+
+            # Find first paragraph end in the next section to insert after
+            if i + 1 < len(sections):
+                section_text = sections[i + 1]
+                para_end = re.search(r"\n\n", section_text)
+                if para_end:
+                    insert_pos = para_end.end()
+                    sections[i + 1] = (
+                        section_text[:insert_pos]
+                        + f"\n![{alt_text}]({slug})\n\n"
+                        + section_text[insert_pos:]
+                    )
+                    injected += 1
+
+        return "".join(result_parts)
 
     def _generate_faq_block(self, article) -> str:
         """Generate a quick FAQ section using Flash-Lite (utility tier)."""

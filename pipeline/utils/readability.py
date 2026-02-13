@@ -275,8 +275,167 @@ def heading_structure_score(text: str) -> dict:
     }
 
 
+def image_coverage(text: str) -> dict:
+    """Analyze image placeholder presence, alt text quality, and distribution.
+
+    Good articles have:
+    - 2-4 image placeholders spread across the article
+    - Descriptive alt text (10+ chars, keyword-relevant)
+    - No empty alt attributes
+
+    Quill generates placeholders like ``![Diagram of diminished value](image:slug)``.
+    """
+    images = re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", text)
+    wc = word_count(text)
+    issues: list[str] = []
+
+    alt_texts = [alt for alt, _url in images]
+    empty_alts = sum(1 for alt in alt_texts if not alt.strip())
+    short_alts = sum(1 for alt in alt_texts if 0 < len(alt.strip()) < 10)
+
+    if len(images) == 0:
+        issues.append("No images in article (target: 2-4 image placeholders with descriptive alt text)")
+    elif len(images) < 2:
+        issues.append(f"Only {len(images)} image (target: 2-4 image placeholders)")
+
+    if empty_alts:
+        issues.append(f"{empty_alts} image(s) missing alt text")
+    if short_alts:
+        issues.append(f"{short_alts} image(s) with very short alt text (<10 chars)")
+
+    # Check distribution: images shouldn't all cluster at top or bottom
+    if len(images) >= 2:
+        positions = [text.find(f"![{alt}]") for alt, _ in images]
+        text_len = len(text) or 1
+        normalized = [p / text_len for p in positions if p >= 0]
+        if normalized:
+            in_first_quarter = sum(1 for p in normalized if p < 0.25)
+            if in_first_quarter == len(normalized):
+                issues.append("All images clustered in first quarter — distribute throughout article")
+
+    return {
+        "image_count": len(images),
+        "empty_alt_count": empty_alts,
+        "short_alt_count": short_alts,
+        "alt_texts": alt_texts,
+        "issues": issues,
+    }
+
+
+def scanability_score(text: str) -> dict:
+    """Measure how scannable the content is for web readers.
+
+    Checks for formatting elements that help readers skim:
+    - Bullet and numbered lists (readers love lists)
+    - Bold key terms (visual anchors for scanning)
+    - Tables (structured data presentation)
+    - Blockquotes / callouts (breaks up wall-of-text)
+    """
+    # Count bullet lists (- or * at start of line)
+    bullet_items = len(re.findall(r"^\s*[-*+]\s+\S", text, re.MULTILINE))
+    # Count numbered lists
+    numbered_items = len(re.findall(r"^\s*\d+\.\s+\S", text, re.MULTILINE))
+    total_list_items = bullet_items + numbered_items
+
+    # Count bold text usage (key terms highlighted for scanning)
+    bold_phrases = re.findall(r"\*\*([^*]+)\*\*", text)
+
+    # Count tables (header + separator + data rows)
+    table_rows = len(re.findall(r"^\|.+\|$", text, re.MULTILINE))
+    has_table = table_rows >= 3
+
+    # Count blockquotes (Adjuster Insider callouts, tips)
+    blockquotes = len(re.findall(r"^>\s+", text, re.MULTILINE))
+
+    issues: list[str] = []
+    if total_list_items < 3:
+        issues.append(
+            f"Only {total_list_items} list items (target: ≥5 bullet/numbered items for scanability)"
+        )
+    if len(bold_phrases) < 3:
+        issues.append(
+            f"Only {len(bold_phrases)} bold phrases (target: ≥5 key terms bolded for scanning)"
+        )
+
+    # Composite score (0.0 - 2.0 scale, normalized by Sage to points)
+    score = 0.0
+    if total_list_items >= 8:
+        score += 1.0
+    elif total_list_items >= 5:
+        score += 0.7
+    elif total_list_items >= 3:
+        score += 0.4
+
+    if len(bold_phrases) >= 5:
+        score += 0.5
+    elif len(bold_phrases) >= 3:
+        score += 0.3
+
+    if has_table:
+        score += 0.3
+
+    if blockquotes >= 2:
+        score += 0.2
+    elif blockquotes >= 1:
+        score += 0.1
+
+    return {
+        "bullet_items": bullet_items,
+        "numbered_items": numbered_items,
+        "total_list_items": total_list_items,
+        "bold_count": len(bold_phrases),
+        "has_table": has_table,
+        "blockquotes": blockquotes,
+        "score": round(score, 2),
+        "issues": issues,
+    }
+
+
+def detect_faq_schema(text: str) -> dict:
+    """Check for FAQPage JSON-LD structured data.
+
+    Articles with FAQ sections should also include the corresponding
+    JSON-LD schema for rich snippet eligibility in search results.
+    """
+    has_faq_section = bool(re.search(
+        r"^##\s+.*(?:FAQ|Frequently Asked|Common Questions)",
+        text, re.MULTILINE | re.IGNORECASE,
+    ))
+    has_json_ld = "FAQPage" in text and '"@type"' in text
+    faq_questions = re.findall(r"^###\s+(.+\?)\s*$", text, re.MULTILINE)
+
+    issues: list[str] = []
+    if has_faq_section and not has_json_ld:
+        issues.append("FAQ section present but no FAQPage JSON-LD schema (missing rich snippet opportunity)")
+    if has_json_ld:
+        # Validate structure
+        try:
+            import json as _json
+            # Extract JSON-LD block
+            match = re.search(
+                r"<script[^>]*type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
+                text, re.DOTALL,
+            )
+            if match:
+                schema = _json.loads(match.group(1))
+                if schema.get("@type") != "FAQPage":
+                    issues.append("JSON-LD schema @type is not FAQPage")
+                main_entity = schema.get("mainEntity", [])
+                if len(main_entity) < 3:
+                    issues.append(f"FAQPage schema has only {len(main_entity)} questions (target: ≥3)")
+        except Exception:
+            issues.append("FAQPage JSON-LD is malformed")
+
+    return {
+        "has_faq_section": has_faq_section,
+        "has_json_ld": has_json_ld,
+        "faq_question_count": len(faq_questions),
+        "issues": issues,
+    }
+
+
 def readability_report(text: str) -> dict:
-    """Generate a full readability report."""
+    """Generate a full readability report including media and scanability."""
     fk = flesch_kincaid_score(text)
     avg_sent = avg_sentence_length(text)
     avg_para = avg_paragraph_length(text)
@@ -286,8 +445,11 @@ def readability_report(text: str) -> dict:
     variety = sentence_length_variety(text)
     complex_density = complex_word_density(text)
     headings = heading_structure_score(text)
+    images = image_coverage(text)
+    scan = scanability_score(text)
+    faq_schema = detect_faq_schema(text)
 
-    issues = []
+    issues: list[str] = []
     if fk < 60:
         issues.append(f"Flesch-Kincaid score {fk} (target: 60+)")
     if avg_sent > 25:
@@ -306,6 +468,9 @@ def readability_report(text: str) -> dict:
         pct = round(complex_density * 100)
         issues.append(f"Complex word density {pct}% (target: ≤8%) — simplify multi-syllable words")
     issues.extend(headings["issues"])
+    issues.extend(images["issues"])
+    issues.extend(scan["issues"])
+    issues.extend(faq_schema["issues"])
 
     return {
         "flesch_kincaid": fk,
@@ -316,6 +481,9 @@ def readability_report(text: str) -> dict:
         "sentence_length_variety": variety,
         "complex_word_density": complex_density,
         "heading_structure": headings,
+        "image_coverage": images,
+        "scanability": scan,
+        "faq_schema": faq_schema,
         "word_count": wc,
         "issues": issues,
         "passes": fk >= 60 and avg_sent <= 25,
