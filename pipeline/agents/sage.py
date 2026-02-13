@@ -13,7 +13,7 @@ from typing import Any
 
 import requests
 
-from pipeline.agents.base import BaseAgent
+from pipeline.agents.base import BaseAgent, RateLimitError
 from pipeline.db import ArticleStatus
 from pipeline.utils.readability import readability_report, word_count
 from pipeline.utils.seo import detect_faq_section, extract_links, score_seo
@@ -85,6 +85,17 @@ class SageAgent(BaseAgent):
             try:
                 result = self._review_article(article)
                 results.append(result)
+            except RateLimitError as e:
+                # Rate limit — release the claim but keep status as REVIEW so
+                # Sage picks it up again on the next run. DON'T bounce to
+                # REVISION because the article content hasn't been scored yet.
+                logger.warning(
+                    f"Rate limited reviewing article {article.id}: {e}"
+                )
+                self.db.update_article(article.id, editor_claim="")
+                self.db.record_metric("rate_limit", 0, json.dumps({
+                    "agent": "sage", "article_id": article.id,
+                }))
             except Exception as e:
                 logger.error(
                     f"Error reviewing article {article.id}: {e}", exc_info=True
