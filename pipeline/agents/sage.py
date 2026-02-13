@@ -13,6 +13,8 @@ from typing import Any
 
 import requests
 
+from content_quality.validators.product_validator import ProductClaimValidator
+from content_quality.validators.state_validator import StateRegulationValidator
 from pipeline.agents.base import BaseAgent, RateLimitError
 from pipeline.db import ArticleStatus
 from pipeline.utils.readability import readability_report, word_count
@@ -249,6 +251,21 @@ class SageAgent(BaseAgent):
         total_score += legal_score
         all_issues.extend(legal_issues)
 
+        # 9. State regulation accuracy
+        state_validator = StateRegulationValidator()
+        state_result = state_validator.validate(content, article.target_state)
+        state_accuracy = state_result["status"]  # PASS / WARN / FAIL
+        for issue in state_result.get("issues", []):
+            msg = issue if isinstance(issue, str) else issue.get("message", str(issue))
+            all_issues.append(f"[State Accuracy] {msg}")
+
+        # 10. Product compliance
+        product_validator = ProductClaimValidator()
+        product_result = product_validator.validate(content)
+        product_compliance = product_result["status"]  # PASS / FAIL
+        for v in product_result.get("hard_violations", []):
+            all_issues.append(f"[Product Compliance] {v.get('suggestion', v.get('matched_text', ''))}")
+
         # Decision — all non-passing articles enter the revision loop so
         # Quill can automatically improve them using Sage's feedback.
         # Articles are only rejected when max revision rounds are exhausted.
@@ -280,6 +297,8 @@ class SageAgent(BaseAgent):
             "editor_claim": "",  # Always release Sage's claim after decision
             "validation_status": "pass" if decision == "approved" else "fail",
             "validation_notes": revision_notes,
+            "state_accuracy": state_accuracy,
+            "product_compliance": product_compliance,
         }
         if decision == "revision":
             existing_notes = article.revision_notes or ""
