@@ -14,14 +14,14 @@
         <div class="container">
             <div class="header-content">
                 <div class="logo">
-                    <h1>📝 ClaimCoach Review Dashboard</h1>
+                    <h1>ClaimCoach Review Dashboard</h1>
                 </div>
                 <div class="header-actions">
                     <button class="btn btn-secondary" onclick="refreshDashboard()">
-                        <span class="icon">🔄</span> Refresh
+                        <span class="icon">&#x21BB;</span> Refresh
                     </button>
                     <div class="notification-badge" id="notificationBadge">
-                        <span class="icon">🔔</span>
+                        <span class="icon">&#x1F514;</span>
                         <span class="badge" id="notificationCount">{{ recent_notifications|length }}</span>
                     </div>
                 </div>
@@ -32,46 +32,64 @@
     <!-- Main Content -->
     <main class="main-content">
         <div class="container">
-            <!-- Stats Cards -->
-            <div class="stats-grid">
-                <div class="stat-card stat-ready">
-                    <div class="stat-icon">✅</div>
-                    <div class="stat-details">
-                        <div class="stat-value">{{ status_counts.get('ready_to_publish', 0) }}</div>
-                        <div class="stat-label">Ready to Publish</div>
+            <!-- Article Lifecycle Pipeline -->
+            <div class="lifecycle-pipeline">
+                <h2 class="section-title" style="margin-bottom: 1rem;">Article Lifecycle</h2>
+                <div class="lifecycle-stages">
+                    <div class="lifecycle-stage">
+                        <div class="lifecycle-count">{{ status_counts.get('backlog', 0) }}</div>
+                        <div class="lifecycle-label">Backlog</div>
+                        <div class="lifecycle-dot lifecycle-dot-backlog"></div>
+                    </div>
+                    <div class="lifecycle-arrow">&#x2192;</div>
+                    <div class="lifecycle-stage">
+                        <div class="lifecycle-count">{{ status_counts.get('todo', 0) }}</div>
+                        <div class="lifecycle-label">Queued</div>
+                        <div class="lifecycle-dot lifecycle-dot-todo"></div>
+                    </div>
+                    <div class="lifecycle-arrow">&#x2192;</div>
+                    <div class="lifecycle-stage">
+                        <div class="lifecycle-count">{{ status_counts.get('in_progress', 0) }}</div>
+                        <div class="lifecycle-label">Writing</div>
+                        <div class="lifecycle-dot lifecycle-dot-writing"></div>
+                    </div>
+                    <div class="lifecycle-arrow">&#x2192;</div>
+                    <div class="lifecycle-stage">
+                        <div class="lifecycle-count">{{ status_counts.get('review', 0) }}</div>
+                        <div class="lifecycle-label">Review</div>
+                        <div class="lifecycle-dot lifecycle-dot-review"></div>
+                    </div>
+                    <div class="lifecycle-arrow">&#x2192;</div>
+                    <div class="lifecycle-stage">
+                        <div class="lifecycle-count">{{ status_counts.get('ready_to_publish', 0) }}</div>
+                        <div class="lifecycle-label">Approved</div>
+                        <div class="lifecycle-dot lifecycle-dot-approved"></div>
+                    </div>
+                    <div class="lifecycle-arrow">&#x2192;</div>
+                    <div class="lifecycle-stage">
+                        <div class="lifecycle-count">{{ status_counts.get('done', 0) }}</div>
+                        <div class="lifecycle-label">Published</div>
+                        <div class="lifecycle-dot lifecycle-dot-published"></div>
+                    </div>
+                    <div class="lifecycle-arrow">&#x2192;</div>
+                    <div class="lifecycle-stage">
+                        <div class="lifecycle-count">{{ status_counts.get('amplified', 0) }}</div>
+                        <div class="lifecycle-label">Amplified</div>
+                        <div class="lifecycle-dot lifecycle-dot-amplified"></div>
                     </div>
                 </div>
-
-                <div class="stat-card stat-review">
-                    <div class="stat-icon">👀</div>
-                    <div class="stat-details">
-                        <div class="stat-value">{{ status_counts.get('review', 0) }}</div>
-                        <div class="stat-label">In Review</div>
-                    </div>
+                {% if status_counts.get('revision', 0) > 0 or status_counts.get('rejected', 0) > 0 %}
+                <div class="lifecycle-sidebar-counts">
+                    {% if status_counts.get('revision', 0) > 0 %}
+                    <span class="lifecycle-side-badge lifecycle-side-revision">{{ status_counts.get('revision', 0) }} in revision</span>
+                    {% endif %}
+                    {% if status_counts.get('rejected', 0) > 0 %}
+                    <span class="lifecycle-side-badge lifecycle-side-rejected">{{ status_counts.get('rejected', 0) }} rejected</span>
+                    {% endif %}
                 </div>
-
-                <div class="stat-card stat-revision">
-                    <div class="stat-icon">✏️</div>
-                    <div class="stat-details">
-                        <div class="stat-value">{{ status_counts.get('revision', 0) }}</div>
-                        <div class="stat-label">Needs Revision</div>
-                    </div>
-                </div>
-
-                <div class="stat-card stat-rejected">
-                    <div class="stat-icon">&#x274C;</div>
-                    <div class="stat-details">
-                        <div class="stat-value">{{ status_counts.get('rejected', 0) }}</div>
-                        <div class="stat-label">Rejected</div>
-                    </div>
-                </div>
-
-                <div class="stat-card stat-published">
-                    <div class="stat-icon">🚀</div>
-                    <div class="stat-details">
-                        <div class="stat-value">{{ status_counts.get('done', 0) }}</div>
-                        <div class="stat-label">Published</div>
-                    </div>
+                {% endif %}
+                <div class="lifecycle-total">
+                    {{ status_counts.values()|sum }} total articles &middot; Approval threshold: {{ approval_threshold }}/100
                 </div>
             </div>
 
@@ -116,7 +134,7 @@
                         <div class="step-number">4</div>
                         <div class="step-info">
                             <div class="step-name">Quill</div>
-                            <div class="step-desc">Write articles using Gemini AI</div>
+                            <div class="step-desc">Write articles with AI</div>
                         </div>
                         <button class="btn btn-sm btn-outline" onclick="triggerStep('quill', this)">Run</button>
                     </div>
@@ -141,16 +159,20 @@
 
             <!-- Filters -->
             <div class="filters">
-                <button class="filter-btn active" data-status="all">All Articles</button>
-                <button class="filter-btn" data-status="ready_to_publish">Ready to Publish</button>
+                <button class="filter-btn active" data-status="all">All</button>
+                <button class="filter-btn" data-status="in_progress">Writing</button>
                 <button class="filter-btn" data-status="review">In Review</button>
+                <button class="filter-btn" data-status="ready_to_publish">Approved</button>
                 <button class="filter-btn" data-status="revision">Revision</button>
                 <button class="filter-btn" data-status="rejected">Rejected</button>
+                <button class="filter-btn" data-status="todo">Queued</button>
+                <button class="filter-btn" data-status="done">Published</button>
+                <button class="filter-btn" data-status="amplified">Amplified</button>
             </div>
 
             <!-- Articles List -->
             <div class="articles-section">
-                <h2 class="section-title">Articles Awaiting Review</h2>
+                <h2 class="section-title">Articles</h2>
 
                 {% if articles %}
                 <div class="articles-list">
@@ -164,24 +186,28 @@
                                 {% if article.target_state %}
                                 <span class="state-badge">{{ article.target_state }}</span>
                                 {% endif %}
+                                {% if article.word_count %}
+                                <span class="state-badge">{{ article.word_count }} words</span>
+                                {% endif %}
                             </div>
                             <div class="article-actions-mini">
                                 <a href="/article/{{ article.id }}" class="btn btn-sm btn-primary">
-                                    Review →
+                                    Review &rarr;
                                 </a>
                             </div>
                         </div>
 
                         <h3 class="article-title">
-                            <a href="/article/{{ article.id }}">{{ article.title }}</a>
+                            <a href="/article/{{ article.id }}">{{ article.title or article.target_keyword or 'Untitled' }}</a>
                         </h3>
 
                         {% if article.target_keyword %}
                         <div class="article-keyword">
-                            <span class="icon">🎯</span> {{ article.target_keyword }}
+                            Target: {{ article.target_keyword }}
                         </div>
                         {% endif %}
 
+                        {% if article.seo_score or article.readability_score %}
                         <div class="article-scores">
                             <div class="score-item">
                                 <div class="score-label">SEO Score</div>
@@ -201,11 +227,12 @@
                                 <div class="score-value">{{ "%.1f"|format(article.readability_score) if article.readability_score else 'N/A' }}</div>
                             </div>
                         </div>
+                        {% endif %}
 
                         {% if article.validation_status %}
                         <div class="article-validation">
                             <span class="validation-{{ 'pass' if article.validation_status == 'PASS' else 'fail' }}">
-                                {{ '✅ Passed' if article.validation_status == 'PASS' else '❌ Failed' }} Validation
+                                {{ 'Passed' if article.validation_status == 'PASS' else 'Failed' }} Validation
                             </span>
                         </div>
                         {% endif %}
@@ -223,9 +250,9 @@
                 </div>
                 {% else %}
                 <div class="empty-state">
-                    <div class="empty-icon">📭</div>
-                    <h3>No Articles to Review</h3>
-                    <p>All caught up! Check back later for new articles.</p>
+                    <div class="empty-icon">&#x1F4ED;</div>
+                    <h3>No Articles Yet</h3>
+                    <p>Run the pipeline above to start generating articles.</p>
                 </div>
                 {% endif %}
             </div>
@@ -237,14 +264,14 @@
                 <div class="notifications-list">
                     {% for notification in recent_notifications|reverse %}
                     <div class="notification-item">
-                        <div class="notification-icon">📬</div>
+                        <div class="notification-icon">&#x1F4EC;</div>
                         <div class="notification-content">
                             <div class="notification-title">
                                 Article #{{ notification.data.article_id }} - {{ notification.data.title|truncate(60) }}
                             </div>
                             <div class="notification-meta">
-                                Status: {{ notification.data.status }} •
-                                SEO: {{ notification.data.get('seo_score', 'N/A') }} •
+                                Status: {{ notification.data.status }} &middot;
+                                SEO: {{ notification.data.get('seo_score', 'N/A') }} &middot;
                                 {{ notification.timestamp }}
                             </div>
                         </div>
@@ -262,7 +289,7 @@
     <!-- Footer -->
     <footer class="footer">
         <div class="container">
-            <p>&copy; 2024 ClaimCoach Content Pipeline • Built with ❤️ by Claude</p>
+            <p>&copy; 2026 ClaimCoach Content Pipeline</p>
         </div>
     </footer>
 

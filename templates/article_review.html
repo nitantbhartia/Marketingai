@@ -13,7 +13,7 @@
         <div class="container">
             <div class="header-content">
                 <div class="logo">
-                    <a href="/">← Back to Dashboard</a>
+                    <a href="/">&larr; Back to Dashboard</a>
                 </div>
                 <div class="header-actions">
                     <span class="status-badge status-{{ article.status }}">
@@ -29,7 +29,7 @@
         <div class="container review-container">
             <!-- Article Header -->
             <div class="article-review-header">
-                <h1 class="article-review-title">{{ article.title }}</h1>
+                <h1 class="article-review-title">{{ article.title or article.target_keyword or 'Untitled' }}</h1>
                 <div class="article-review-meta">
                     <span class="meta-item">
                         <strong>ID:</strong> {{ article.id }}
@@ -47,6 +47,31 @@
                         <strong>Revisions:</strong> {{ article.revision_count or 0 }}
                     </span>
                 </div>
+
+                <!-- Lifecycle Tracker -->
+                <div class="lifecycle-tracker">
+                    {% for stage_key, stage_label in lifecycle_stages %}
+                    {% set is_current = (article.status == stage_key) %}
+                    {% set status_order = {'backlog': 0, 'todo': 1, 'in_progress': 2, 'review': 3, 'ready_to_publish': 4, 'done': 5, 'amplified': 6} %}
+                    {% set current_order = status_order.get(article.status, -1) %}
+                    {% set stage_order = status_order.get(stage_key, -1) %}
+                    {% set is_past = (stage_order < current_order) %}
+                    <div class="tracker-stage {{ 'tracker-current' if is_current else 'tracker-done' if is_past else 'tracker-pending' }}">
+                        <div class="tracker-dot">
+                            {% if is_past %}&#x2713;{% elif is_current %}&#x25CF;{% else %}&#x25CB;{% endif %}
+                        </div>
+                        <div class="tracker-label">{{ stage_label }}</div>
+                    </div>
+                    {% if not loop.last %}
+                    <div class="tracker-line {{ 'tracker-line-done' if is_past else '' }}"></div>
+                    {% endif %}
+                    {% endfor %}
+                    {% if article.status == 'revision' %}
+                    <div class="tracker-branch">&#x21A9; Revision loop (round {{ article.revision_count or 1 }})</div>
+                    {% elif article.status == 'rejected' %}
+                    <div class="tracker-branch tracker-branch-rejected">&#x2717; Rejected</div>
+                    {% endif %}
+                </div>
             </div>
 
             <!-- Two Column Layout -->
@@ -60,7 +85,7 @@
                             <label>Meta Title</label>
                             <div class="meta-value">
                                 {{ article.meta_title or article.title }}
-                                <span class="char-count">({{ (article.meta_title or article.title)|length }} chars)</span>
+                                <span class="char-count">({{ (article.meta_title or article.title or '')|length }} chars)</span>
                             </div>
                         </div>
                         <div class="meta-field">
@@ -108,7 +133,7 @@
                         <div class="validation-issues">
                             {% for note in validation_notes %}
                             <div class="validation-issue">
-                                <span class="issue-icon">⚠️</span>
+                                <span class="issue-icon">&#x26A0;</span>
                                 <span class="issue-text">{{ note }}</span>
                             </div>
                             {% endfor %}
@@ -155,6 +180,34 @@
 
                 <!-- Right Column - Scores & Actions -->
                 <div class="review-sidebar">
+                    <!-- Approval Status -->
+                    {% if article.seo_score %}
+                    <div class="sidebar-card">
+                        <h3 class="card-heading">Approval Gate</h3>
+                        <div class="approval-gate">
+                            <div class="approval-score">
+                                <span class="approval-value {{ 'score-excellent' if article.seo_score >= approval_threshold else 'score-needs-work' }}">
+                                    {{ article.seo_score }}
+                                </span>
+                                <span class="approval-separator">/</span>
+                                <span class="approval-threshold">{{ approval_threshold }}</span>
+                            </div>
+                            <div class="approval-label">
+                                {% if article.seo_score >= approval_threshold %}
+                                Meets threshold &mdash; auto-approved by Sage
+                                {% else %}
+                                Below threshold &mdash; needs {{ approval_threshold - article.seo_score }} more points
+                                {% endif %}
+                            </div>
+                            <div class="score-bar-large" style="margin-top: 0.75rem;">
+                                <div class="score-fill-large score-{{ 'excellent' if article.seo_score >= approval_threshold else 'needs-work' }}"
+                                     style="width: {{ article.seo_score }}%"></div>
+                                <div class="approval-marker" style="left: {{ approval_threshold }}%;" title="Threshold: {{ approval_threshold }}"></div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
                     <!-- Quality Scores -->
                     <div class="sidebar-card">
                         <h3 class="card-heading">Quality Scores</h3>
@@ -171,21 +224,12 @@
                                 <div class="score-fill-large score-{{ 'excellent' if article.seo_score >= 80 else 'good' if article.seo_score >= 60 else 'needs-work' }}"
                                      style="width: {{ article.seo_score }}%"></div>
                             </div>
-                            <div class="score-verdict">
-                                {% if article.seo_score >= 80 %}
-                                ✅ Excellent - Ready for top rankings
-                                {% elif article.seo_score >= 60 %}
-                                ⚠️ Good - Minor improvements possible
-                                {% else %}
-                                ❌ Needs Work - Significant issues
-                                {% endif %}
-                            </div>
                             {% endif %}
                         </div>
 
                         <div class="score-detail">
                             <div class="score-header">
-                                <span class="score-label">Readability</span>
+                                <span class="score-label">Readability (FK)</span>
                                 <span class="score-number score-{{ 'excellent' if article.readability_score and article.readability_score >= 70 else 'good' if article.readability_score and article.readability_score >= 50 else 'needs-work' }}">
                                     {{ "%.1f"|format(article.readability_score) if article.readability_score else 'N/A' }}/100
                                 </span>
@@ -197,11 +241,11 @@
                             </div>
                             <div class="score-verdict">
                                 {% if article.readability_score >= 70 %}
-                                ✅ Easy to Read - 8th grade level
+                                Easy to Read (8th grade level)
                                 {% elif article.readability_score >= 50 %}
-                                ⚠️ Moderate - Could be clearer
+                                Moderate &mdash; could be clearer
                                 {% else %}
-                                ❌ Difficult - Too complex
+                                Difficult &mdash; too complex for general audience
                                 {% endif %}
                             </div>
                             {% endif %}
@@ -232,6 +276,12 @@
                                     {{ article.math_errors_count or 0 }}
                                 </span>
                             </div>
+                            <div class="metric-row">
+                                <span class="metric-label">Word Count</span>
+                                <span class="metric-value {{ 'metric-pass' if word_count >= 1500 else 'metric-fail' }}">
+                                    {{ word_count }} {{ '(min 1500)' if word_count < 1500 else '' }}
+                                </span>
+                            </div>
                         </div>
                     </div>
 
@@ -245,10 +295,10 @@
                             <div class="cta-text">{{ cta.cta_text|truncate(80) }}</div>
                             {% if cta.impressions or cta.clicks %}
                             <div class="cta-metrics">
-                                <span>👁 {{ cta.impressions }}</span>
-                                <span>👆 {{ cta.clicks }}</span>
+                                <span>{{ cta.impressions }} views</span>
+                                <span>{{ cta.clicks }} clicks</span>
                                 {% if cta.conversions %}
-                                <span>✅ {{ cta.conversions }}</span>
+                                <span>{{ cta.conversions }} conversions</span>
                                 {% endif %}
                             </div>
                             {% endif %}
@@ -263,11 +313,11 @@
 
                         {% if article.status == 'review' or article.status == 'ready_to_publish' %}
                         <button class="btn btn-success btn-full" onclick="approveArticle()">
-                            ✅ Approve & Publish
+                            Approve &amp; Publish
                         </button>
 
                         <button class="btn btn-warning btn-full" onclick="requestRevision()">
-                            ✏️ Request Revision
+                            Request Revision
                         </button>
                         {% endif %}
 
@@ -279,18 +329,18 @@
 
                         {% if article.status == 'ready_to_publish' %}
                         <button class="btn btn-primary btn-full" onclick="publishNow()">
-                            🚀 Publish Immediately
+                            Publish Immediately
                         </button>
                         {% endif %}
 
                         {% if article.published_url %}
                         <a href="{{ article.published_url }}" target="_blank" class="btn btn-secondary btn-full">
-                            👁 View Published
+                            View Published
                         </a>
                         {% endif %}
 
                         <a href="/" class="btn btn-outline btn-full">
-                            ← Back to Dashboard
+                            &larr; Back to Dashboard
                         </a>
                     </div>
 

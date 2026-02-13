@@ -68,13 +68,18 @@ async def dashboard(request: Request):
                        word_count, created_at, updated_at,
                        writer_claim, editor_claim
                 FROM articles
-                WHERE status IN ('review', 'ready_to_publish', 'revision', 'rejected')
+                WHERE status IN ('review', 'ready_to_publish', 'revision', 'rejected',
+                                 'todo', 'in_progress', 'done', 'amplified')
                 ORDER BY
                     CASE status
-                        WHEN 'ready_to_publish' THEN 1
+                        WHEN 'in_progress' THEN 1
                         WHEN 'review' THEN 2
-                        WHEN 'revision' THEN 3
-                        WHEN 'rejected' THEN 4
+                        WHEN 'ready_to_publish' THEN 3
+                        WHEN 'revision' THEN 4
+                        WHEN 'todo' THEN 5
+                        WHEN 'rejected' THEN 6
+                        WHEN 'done' THEN 7
+                        WHEN 'amplified' THEN 8
                     END,
                     updated_at DESC
             """)
@@ -89,10 +94,19 @@ async def dashboard(request: Request):
             """)
             status_counts = {row[0]: row[1] for row in cursor.fetchall()}
 
+        # Get approval threshold from pipeline config
+        try:
+            from pipeline.config import Config
+            cfg = Config.load()
+            approval_threshold = cfg.pipeline.approval_score_threshold
+        except Exception:
+            approval_threshold = 90
+
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
             "articles": articles,
             "status_counts": status_counts,
+            "approval_threshold": approval_threshold,
             "recent_notifications": recent_notifications[-10:],  # Last 10
             "now": datetime.now()
         })
@@ -145,31 +159,60 @@ async def review_article(request: Request, article_id: int):
     if article_dict.get("validation_notes"):
         try:
             validation_notes = json.loads(article_dict["validation_notes"])
-        except:
+        except Exception:
             validation_notes = []
 
     # Get validation history
-    with get_db() as db:
-        cursor = db.execute("""
-            SELECT agent_name, action, details, created_at
-            FROM agent_log
-            WHERE article_id = ?
-            ORDER BY created_at DESC
-            LIMIT 20
-        """, (article_id,))
-        history = [dict(row) for row in cursor.fetchall()]
+    history = []
+    try:
+        with get_db() as db:
+            cursor = db.execute("""
+                SELECT agent_name, action, details, created_at
+                FROM agent_log
+                WHERE article_id = ?
+                ORDER BY created_at DESC
+                LIMIT 20
+            """, (article_id,))
+            history = [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        pass  # agent_log table may not exist yet
 
     # Get CTA variants if any
-    with get_db() as db:
-        cursor = db.execute("""
-            SELECT cta_text, cta_type, position, impressions, clicks, conversions
-            FROM cta_variants
-            WHERE article_id = ?
-        """, (article_id,))
-        cta_variants = [dict(row) for row in cursor.fetchall()]
+    cta_variants = []
+    try:
+        with get_db() as db:
+            cursor = db.execute("""
+                SELECT cta_text, cta_type, position, impressions, clicks, conversions
+                FROM cta_variants
+                WHERE article_id = ?
+            """, (article_id,))
+            cta_variants = [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        pass  # cta_variants table may not exist yet
 
     # Calculate estimated word count from markdown
-    word_count = len(article_dict.get("markdown_content", "").split())
+    word_count = article_dict.get("word_count") or len(
+        article_dict.get("markdown_content", "").split()
+    )
+
+    # Get approval threshold from pipeline config
+    try:
+        from pipeline.config import Config
+        cfg = Config.load()
+        approval_threshold = cfg.pipeline.approval_score_threshold
+    except Exception:
+        approval_threshold = 90
+
+    # Define lifecycle stages for the tracker
+    lifecycle_stages = [
+        ("backlog", "Backlog"),
+        ("todo", "Queued"),
+        ("in_progress", "Writing"),
+        ("review", "Review"),
+        ("ready_to_publish", "Approved"),
+        ("done", "Published"),
+        ("amplified", "Amplified"),
+    ]
 
     return templates.TemplateResponse("article_review.html", {
         "request": request,
@@ -177,7 +220,9 @@ async def review_article(request: Request, article_id: int):
         "validation_notes": validation_notes,
         "history": history,
         "cta_variants": cta_variants,
-        "word_count": word_count
+        "word_count": word_count,
+        "approval_threshold": approval_threshold,
+        "lifecycle_stages": lifecycle_stages,
     })
 
 

@@ -36,18 +36,58 @@ AGENT_MAP = {
     "morgan": MorganAgent,
 }
 
+# Agents that use the simpler Agent base class (config dict, no db arg)
+SIMPLE_AGENTS = {"atlas", "rival", "remix"}
+
+
+def _build_simple_config(config: Config) -> dict[str, Any]:
+    """Convert Config dataclass to dict for simple Agent base class."""
+    return {
+        "anthropic_api_key": config.anthropic.api_key,
+        "blog_output_dir": config.blog.output_dir,
+        "site_url": config.blog.site_url,
+    }
+
+
+def _run_simple_agent(agent_name: str, config: Config) -> dict[str, Any]:
+    """Run agents that use the simpler Agent base class."""
+    config_dict = _build_simple_config(config)
+
+    if agent_name == "atlas":
+        from pipeline.agents.atlas import Atlas
+        agent = Atlas(config_dict)
+    elif agent_name == "rival":
+        from pipeline.agents.rival import Rival
+        config_dict["competitor_domains"] = getattr(config, "competitor_domains", [])
+        config_dict["target_keywords"] = getattr(config, "target_keywords", [])
+        agent = Rival(config_dict)
+    elif agent_name == "remix":
+        from pipeline.agents.remix import Remix
+        config_dict["remix_types"] = ["twitter", "linkedin", "email", "youtube"]
+        agent = Remix(config_dict)
+    else:
+        raise ValueError(f"Unknown simple agent: {agent_name}")
+
+    return agent.run()
+
 
 def run_agent(agent_name: str, config: Config, db: Database) -> dict[str, Any]:
     """Run a single agent and return its result."""
-    agent_cls = AGENT_MAP.get(agent_name)
-    if not agent_cls:
-        raise ValueError(f"Unknown agent: {agent_name}. Available: {list(AGENT_MAP)}")
-
-    agent = agent_cls(config=config, db=db)
     logger.info(f"Running {agent_name}...")
 
     try:
-        result = agent.run()
+        if agent_name in SIMPLE_AGENTS:
+            result = _run_simple_agent(agent_name, config)
+        else:
+            agent_cls = AGENT_MAP.get(agent_name)
+            if not agent_cls:
+                raise ValueError(
+                    f"Unknown agent: {agent_name}. "
+                    f"Available: {sorted(list(AGENT_MAP) + list(SIMPLE_AGENTS))}"
+                )
+            agent = agent_cls(config=config, db=db)
+            result = agent.run()
+
         logger.info(f"{agent_name} completed: {result}")
         return result
     except Exception as e:
@@ -59,7 +99,10 @@ def run_agent(agent_name: str, config: Config, db: Database) -> dict[str, Any]:
 def run_all_agents(config: Config, db: Database) -> dict[str, Any]:
     """Run all agents in pipeline order (for manual/one-shot execution)."""
     results = {}
-    pipeline_order = ["scout", "quill", "sage", "ezra", "herald", "lurker", "morgan"]
+    pipeline_order = [
+        "scout", "quill", "sage", "ezra", "herald", "lurker", "morgan",
+        "atlas", "rival", "remix",
+    ]
 
     for agent_name in pipeline_order:
         results[agent_name] = run_agent(agent_name, config, db)
@@ -87,6 +130,9 @@ def start_scheduler(config: Config, db: Database) -> None:
         "herald": config.schedule.herald,
         "lurker": config.schedule.lurker,
         "morgan": config.schedule.morgan,
+        "atlas": config.schedule.atlas,
+        "rival": config.schedule.rival,
+        "remix": config.schedule.remix,
     }
 
     for agent_name, cron_expr in schedule_map.items():

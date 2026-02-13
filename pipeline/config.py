@@ -104,6 +104,9 @@ class ScheduleConfig:
     herald: str = "0 10,18 * * *"
     lurker: str = "0 */8 * * *"
     morgan: str = "0 7,13,19 * * *"
+    atlas: str = "0 6 * * *"
+    rival: str = "0 3 * * 1"
+    remix: str = "0 12 * * *"
 
 
 @dataclass
