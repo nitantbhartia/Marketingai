@@ -202,6 +202,21 @@ class SageAgent(BaseAgent):
             seo_scaled = max(0, round(seo_scaled - freshness_deduction, 1))
         seo_issues.extend(f"[Freshness] {i}" for i in fresh.get("issues", []))
 
+        # Header hierarchy check — H1 → H2 → H3 (no skipping levels)
+        heading_pattern = re.compile(r"^(#{1,6})\s+", re.MULTILINE)
+        heading_levels = [len(m.group(1)) for m in heading_pattern.finditer(content)]
+        hierarchy_ok = True
+        for i in range(1, len(heading_levels)):
+            if heading_levels[i] > heading_levels[i - 1] + 1:
+                hierarchy_ok = False
+                seo_issues.append(
+                    f"Heading hierarchy skip: H{heading_levels[i-1]} → H{heading_levels[i]} "
+                    f"(missing H{heading_levels[i-1]+1})"
+                )
+                break
+        if not hierarchy_ok:
+            seo_scaled = max(0, round(seo_scaled - 1.0, 1))
+
         scores["seo"] = {"score": seo_scaled, "max": 18, "issues": seo_issues}
         total_score += seo_scaled
         all_issues.extend(seo_issues)
@@ -666,7 +681,7 @@ Article excerpt:
 Title: {article.title}
 Target State: {article.target_state}
 
-{content[:3000]}
+{self._sample_content_sections(content)}
 
 List ONLY factual errors or unauthorized claims. If none found, respond with "NO ISSUES".
 Format each issue on its own line starting with "- "."""
@@ -680,12 +695,28 @@ Format each issue on its own line starting with "- "."""
         if "NO ISSUES" in result.upper():
             return []
 
-        issues = []
+        issues: list[str] = []
         for line in result.strip().split("\n"):
             line = line.strip()
             if line.startswith("- "):
                 issues.append(f"AI fact check: {line[2:]}")
         return issues
+
+    @staticmethod
+    def _sample_content_sections(content: str, budget: int = 4000) -> str:
+        """Sample first, middle, and last sections of content for fact checking.
+
+        For articles under *budget* chars, returns the full text.  For longer
+        articles, returns ~1500 chars from the start, ~1500 from the middle,
+        and ~1000 from the end with "[...]" markers between sections.
+        """
+        if len(content) <= budget:
+            return content
+        first = content[:1500]
+        mid_start = len(content) // 2 - 750
+        middle = content[mid_start:mid_start + 1500]
+        last = content[-1000:]
+        return f"{first}\n\n[... middle section ...]\n\n{middle}\n\n[... end section ...]\n\n{last}"
 
     def _check_cta(self, content: str) -> tuple[float, list[str]]:
         """Check for ClaimCoach CTA — placement-aware scoring.

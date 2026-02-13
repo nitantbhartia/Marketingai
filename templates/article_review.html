@@ -143,13 +143,29 @@
                     </div>
                     {% endif %}
 
-                    <!-- Revision History -->
+                    <!-- Revision History (split by round separator) -->
                     {% if article.revision_notes %}
                     <div class="review-section">
-                        <h2 class="section-heading">Revision Notes</h2>
-                        <div class="revision-notes">
-                            {{ article.revision_notes }}
+                        <h2 class="section-heading">
+                            Revision Notes
+                            {% if article.revision_count %}
+                            <span class="state-badge badge-revision-round" style="margin-left: 0.5rem; vertical-align: middle;">
+                                Round {{ article.revision_count }}/{{ max_revision_rounds|default(5) }}
+                            </span>
+                            {% if article.revision_count >= (max_revision_rounds|default(5)) - 1 %}
+                            <span class="state-badge badge-danger-pulse" style="margin-left: 0.25rem; vertical-align: middle;">
+                                At risk
+                            </span>
+                            {% endif %}
+                            {% endif %}
+                        </h2>
+                        {% set rounds = article.revision_notes.split('\n\n---\n\n') %}
+                        {% for round_notes in rounds %}
+                        <div class="revision-round">
+                            <div class="revision-round-header">Round {{ loop.index }}</div>
+                            <div class="revision-notes">{{ round_notes }}</div>
                         </div>
+                        {% endfor %}
                     </div>
                     {% endif %}
 

@@ -199,6 +199,14 @@
                                 {% if article.word_count %}
                                 <span class="state-badge">{{ article.word_count }} words</span>
                                 {% endif %}
+                                {% if article.revision_count and article.revision_count > 0 %}
+                                <span class="state-badge badge-revision-round{% if article.revision_count >= max_revision_rounds - 1 %} badge-rejection-warning{% endif %}">
+                                    Round {{ article.revision_count }}/{{ max_revision_rounds }}
+                                </span>
+                                {% endif %}
+                                {% if article.revision_count and article.revision_count >= max_revision_rounds - 1 and article.status == 'revision' %}
+                                <span class="state-badge badge-danger-pulse">At risk of rejection</span>
+                                {% endif %}
                             </div>
                             <div class="article-actions-mini">
                                 <a href="/article/{{ article.id }}" class="btn btn-sm btn-primary">

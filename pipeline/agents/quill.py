@@ -1559,10 +1559,44 @@ Article:
                 model=self.utility_model,
                 max_tokens=800,
             )
-            return result.strip()
+            faq = result.strip()
+            # Validate FAQ structure: need H3 questions with answers
+            if not self._validate_faq_structure(faq):
+                logger.warning("Generated FAQ failed structure validation, discarding")
+                return ""
+            return faq
         except Exception as e:
             logger.warning(f"FAQ generation failed: {e}")
             return ""
+
+    @staticmethod
+    def _validate_faq_structure(faq_text: str) -> bool:
+        """Validate FAQ has proper Q&A structure.
+
+        Requirements:
+        - At least 2 H3 headers (### Question?)
+        - Each question should end with '?'
+        - Each answer should be at least 30 chars
+        """
+        if not faq_text:
+            return False
+        h3_pattern = re.compile(r"^###\s+(.+)$", re.MULTILINE)
+        questions = h3_pattern.findall(faq_text)
+        if len(questions) < 2:
+            return False
+        # Check questions end with ?
+        valid_qs = sum(1 for q in questions if q.strip().endswith("?"))
+        if valid_qs < 2:
+            return False
+        # Check answers exist between questions
+        sections = re.split(r"^###\s+", faq_text, flags=re.MULTILINE)
+        for section in sections[1:]:  # skip text before first ###
+            # After the question line, the answer follows
+            lines = section.split("\n", 1)
+            answer = lines[1].strip() if len(lines) > 1 else ""
+            if len(answer) < 30:
+                return False
+        return True
 
     def _generate_meta(self, article) -> str:
         """Generate a meta description using Flash-Lite (utility tier)."""
@@ -1683,7 +1717,8 @@ Article:
             f"{len(broad)} broad issues"
         )
 
-        content = article.markdown_content
+        original_content = article.markdown_content
+        content = original_content
         meta = article.meta_description or ""
 
         # Apply targeted fixes
@@ -1721,6 +1756,28 @@ Article:
                 return None  # Fall through to full rewrite
 
         try:
+            # Verify the revision actually changed the content
+            if original_content and content.strip() == original_content.strip():
+                logger.warning(
+                    f"Targeted revision of {article.id} produced identical content — "
+                    f"falling through to full rewrite"
+                )
+                return None
+
+            # Check minimum change threshold (at least 5% different)
+            if original_content:
+                overlap = sum(
+                    1 for a, b in zip(content, original_content) if a == b
+                )
+                max_len = max(len(content), len(original_content), 1)
+                similarity = overlap / max_len
+                if similarity > 0.95:
+                    logger.warning(
+                        f"Targeted revision of {article.id} changed <5% of content — "
+                        f"falling through to full rewrite"
+                    )
+                    return None
+
             slug = self._generate_slug(
                 article.suggested_title or article.title or article.target_keyword.title()
             )

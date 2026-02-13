@@ -689,6 +689,25 @@ class Database:
             ).fetchall()
         return [self._row_to_article(r) for r in rows]
 
+    def clear_stale_claims(self, hours: int = 24) -> int:
+        """Release claim locks held longer than *hours*.
+
+        Returns the number of articles whose claims were cleared.
+        """
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        cleared = 0
+        with self._connect() as conn:
+            for claim_col in ("writer_claim", "editor_claim", "publisher_claim", "herald_claim"):
+                cur = conn.execute(
+                    f"UPDATE articles SET {claim_col} = '' "
+                    f"WHERE {claim_col} != '' AND updated_at < ?",
+                    (cutoff,),
+                )
+                cleared += cur.rowcount
+            conn.commit()
+        return cleared
+
     def get_reviewed_articles(self, limit: int = 30) -> list[Article]:
         """Get recent articles that have been reviewed by Sage (have revision_notes)."""
         with self._connect() as conn:
