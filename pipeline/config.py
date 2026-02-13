@@ -53,6 +53,20 @@ class GeminiConfig:
 
 
 @dataclass
+class ImageConfig:
+    """Image resolution configuration for converting placeholders to real URLs."""
+    # Unsplash API key (optional — Source API works without it for low volume)
+    unsplash_access_key: str = ""
+    # Image dimensions (optimized for OG/social sharing)
+    width: int = 1200
+    height: int = 630
+    # Cache resolved URLs to avoid re-fetching
+    cache_dir: str = ".image_cache"
+    # Enable/disable image resolution entirely
+    enabled: bool = True
+
+
+@dataclass
 class BlogConfig:
     """Static blog publishing configuration."""
     output_dir: str = "./blog"
@@ -113,6 +127,7 @@ class ScheduleConfig:
 class Config:
     anthropic: AnthropicConfig = field(default_factory=AnthropicConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
+    images: ImageConfig = field(default_factory=ImageConfig)
     blog: BlogConfig = field(default_factory=BlogConfig)
     copyscape: CopyscapeConfig = field(default_factory=CopyscapeConfig)
     reddit: RedditConfig = field(default_factory=RedditConfig)
@@ -170,6 +185,9 @@ class Config:
         cfg.gemini.api_key = (
             os.environ.get("GEMINI_API_KEY") or cfg.gemini.api_key
         )
+        cfg.images.unsplash_access_key = (
+            os.environ.get("UNSPLASH_ACCESS_KEY") or cfg.images.unsplash_access_key
+        )
         cfg.llm_provider = (
             os.environ.get("LLM_PROVIDER") or cfg.llm_provider
         )
@@ -189,6 +207,7 @@ class Config:
         section_map = {
             "anthropic": self.anthropic,
             "gemini": self.gemini,
+            "images": self.images,
             "blog": self.blog,
             "copyscape": self.copyscape,
             "reddit": self.reddit,
