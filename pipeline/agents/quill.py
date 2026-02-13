@@ -1957,17 +1957,40 @@ Article:
 
         return "\n".join(lines) if lines else ""
 
+    # Metadata markers the LLM might emit.  Used by _parse_result to strip
+    # leaked tags from the article body.
+    _META_MARKERS = re.compile(
+        r"(?:^|\s+)(?:META_DESCRIPTION|META_TITLE|TITLE|SLUG|KEYWORD|CATEGORY|TARGET_STATE)\s*:\s*[^\n]*",
+        re.IGNORECASE,
+    )
+
     @staticmethod
     def _parse_result(result: str) -> tuple[str, str]:
-        """Parse Claude's output into content and meta description."""
+        """Parse Claude's output into content and meta description.
+
+        Also strips any metadata markers that leaked into the article body
+        (e.g. ``META_DESCRIPTION:`` appearing mid-sentence instead of on
+        its own line).
+        """
         meta_description = ""
-        content_lines = []
+        content_lines: list[str] = []
         for line in result.split("\n"):
-            if line.strip().startswith("META_DESCRIPTION:"):
-                meta_description = line.split("META_DESCRIPTION:", 1)[1].strip()
+            stripped = line.strip()
+            if stripped.upper().startswith("META_DESCRIPTION:"):
+                meta_description = stripped.split(":", 1)[1].strip()
+            elif stripped.upper().startswith("META_TITLE:"):
+                # Discard — we generate meta_title separately
+                pass
             else:
                 content_lines.append(line)
         content = "\n".join(content_lines).strip()
+
+        # Second pass: catch metadata markers that appeared mid-sentence
+        content = QuillAgent._META_MARKERS.sub("", content)
+        # Clean up leftover whitespace artifacts
+        content = re.sub(r"[ \t]+\n", "\n", content)   # trailing spaces
+        content = re.sub(r"\n{3,}", "\n\n", content)    # excessive blank lines
+
         return content, meta_description
 
     @staticmethod

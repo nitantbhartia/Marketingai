@@ -1262,3 +1262,143 @@ class TestSageCriticalViolationReject:
         assert result["decision"] == "rejected"
         updated = self.db.get_article(article.id)
         assert "Maximum revision rounds exceeded" in (updated.revision_notes or "")
+
+
+# ===========================================================================
+# 10. Quill — metadata stripping in _parse_result
+# ===========================================================================
+
+class TestQuillParseResult:
+    """Test that _parse_result strips leaked metadata from article body."""
+
+    def _parse(self, text: str) -> tuple[str, str]:
+        from pipeline.agents.quill import QuillAgent
+        return QuillAgent._parse_result(text)
+
+    def test_normal_meta_on_own_line(self):
+        """META_DESCRIPTION on its own line is extracted cleanly."""
+        raw = "## Title\n\nSome content.\n\nMETA_DESCRIPTION: A great article."
+        content, meta = self._parse(raw)
+        assert "META_DESCRIPTION" not in content
+        assert meta == "A great article."
+        assert "Some content." in content
+
+    def test_meta_leaked_mid_sentence(self):
+        """META_DESCRIPTION appearing mid-text should be stripped from body."""
+        raw = (
+            "## Title\n\n"
+            "You might find comps like these from\n"
+            "META_DESCRIPTION: Find out what your car is worth.\n\n"
+            "## FAQ\n\nSome FAQ content."
+        )
+        content, meta = self._parse(raw)
+        assert "META_DESCRIPTION" not in content
+        assert meta == "Find out what your car is worth."
+        assert "FAQ" in content
+
+    def test_meta_title_stripped(self):
+        """META_TITLE lines should be discarded."""
+        raw = "## Guide\n\nContent here.\nMETA_TITLE: My Title\nMETA_DESCRIPTION: Desc."
+        content, meta = self._parse(raw)
+        assert "META_TITLE" not in content
+        assert meta == "Desc."
+
+    def test_inline_metadata_stripped(self):
+        """Metadata marker embedded inline (not line-start) is cleaned."""
+        raw = (
+            "## Title\n\n"
+            "Great tips here KEYWORD: total loss settlement\n\n"
+            "More content."
+        )
+        content, _ = self._parse(raw)
+        assert "KEYWORD:" not in content
+        assert "Great tips here" in content
+        assert "More content." in content
+
+    def test_clean_content_unchanged(self):
+        """Content without metadata should pass through unchanged."""
+        raw = "## Title\n\nParagraph one.\n\nParagraph two."
+        content, meta = self._parse(raw)
+        assert content == raw
+        assert meta == ""
+
+    def test_no_excessive_blank_lines(self):
+        """After stripping, no runs of 3+ blank lines remain."""
+        raw = "## Title\n\n\n\nMETA_DESCRIPTION: desc\n\n\n\nContent."
+        content, _ = self._parse(raw)
+        assert "\n\n\n" not in content
+
+
+# ===========================================================================
+# 11. Sage — content integrity check (leaked metadata + truncation)
+# ===========================================================================
+
+class TestSageContentIntegrity:
+    """Test _check_content_integrity detects metadata leaks and truncation."""
+
+    def setup_method(self):
+        self.db = _make_db()
+        cfg = _make_config()
+        cfg.gemini.api_key = "test-key"
+        cfg.llm_provider = "gemini"
+        from pipeline.agents.sage import SageAgent
+        self.sage = SageAgent(cfg, self.db)
+
+    def test_detects_leaked_meta_description(self):
+        content = (
+            "## Guide\n\n"
+            "Your car was totaled. META_DESCRIPTION: Find out what it's worth.\n\n"
+            "More content."
+        )
+        penalty, issues = self.sage._check_content_integrity(content)
+        assert penalty >= 3.0
+        assert any("Leaked metadata" in i for i in issues)
+
+    def test_detects_leaked_keyword(self):
+        content = "## Title\n\nGreat guide KEYWORD: total loss settlement\n\nContent."
+        penalty, issues = self.sage._check_content_integrity(content)
+        assert penalty >= 3.0
+        assert any("Leaked metadata" in i for i in issues)
+
+    def test_detects_truncated_sentence(self):
+        content = (
+            "## Title\n\n"
+            "You might find comps like these from\n\n"
+            "## FAQ\n\nQuestion one."
+        )
+        penalty, issues = self.sage._check_content_integrity(content)
+        assert penalty >= 1.5
+        assert any("Truncated" in i for i in issues)
+
+    def test_clean_content_no_penalty(self):
+        content = (
+            "## Total Loss Guide\n\n"
+            "When your car is totaled, you need to understand fair value. "
+            "Here are the steps to follow.\n\n"
+            "## Step One\n\nGather your documents."
+        )
+        penalty, issues = self.sage._check_content_integrity(content)
+        assert penalty == 0.0
+        assert len(issues) == 0
+
+    def test_penalty_capped_at_5(self):
+        """Multiple violations should not exceed 5 points."""
+        content = (
+            "META_DESCRIPTION: one\n"
+            "Some text META_TITLE: two\n"
+            "More text KEYWORD: three\n"
+            "Ends with from"
+        )
+        penalty, _ = self.sage._check_content_integrity(content)
+        assert penalty <= 5.0
+
+    def test_sentence_ending_with_period_not_flagged(self):
+        """Normal sentences ending with periods should not be flagged."""
+        content = (
+            "## Guide\n\n"
+            "Get compensation from your insurance company. "
+            "You can negotiate with the adjuster."
+        )
+        penalty, issues = self.sage._check_content_integrity(content)
+        truncation_issues = [i for i in issues if "Truncated" in i]
+        assert len(truncation_issues) == 0
