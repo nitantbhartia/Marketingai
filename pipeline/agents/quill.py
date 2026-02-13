@@ -16,8 +16,11 @@ from typing import Any
 
 from pipeline.agents.base import BaseAgent, RateLimitError
 from pipeline.db import ArticleStatus
+from pipeline.utils.freshness import auto_fix_stale_years
+from pipeline.utils.nhtsa import enrich_vehicle_article
 from pipeline.utils.readability import readability_report, word_count
 from pipeline.utils.seo import _keyword_match, detect_faq_section, extract_links
+from pipeline.utils.serp import SerpAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -324,11 +327,19 @@ class QuillAgent(BaseAgent):
         # ── Phase 0: Entity mapping (E-E-A-T knowledge graph) ──
         entity_map = self._extract_entities(article)
 
+        # ── Phase 0b: SERP analysis (real-time search intelligence) ──
+        serp_context = self._get_serp_context(article)
+
+        # ── Phase 0c: Vehicle data enrichment (NHTSA, if applicable) ──
+        nhtsa_context = self._get_nhtsa_context(article)
+
         # ── Phase 1: Generate outline ──
         outline = self._generate_outline(
             article, product_context, state_rules, internal_links_context,
             entity_map=entity_map,
             revision_feedback=article.revision_notes if is_revision else "",
+            serp_context=serp_context,
+            nhtsa_context=nhtsa_context,
         )
 
         # ── Phase 2: Write article (section-by-section from outline) ──
@@ -519,12 +530,78 @@ SOURCES: source1, source2, source3"""
             return ""
 
     # ------------------------------------------------------------------
+    # Phase 0b: SERP analysis (real-time search intelligence)
+    # ------------------------------------------------------------------
+    def _get_serp_context(self, article) -> str:
+        """Pull real-time SERP data for the target keyword.
+
+        Uses SerpAPI, Google CSE, or Autocomplete (free fallback) to gather:
+        - People Also Ask questions → feed into FAQ section
+        - Related searches → LSI keyword coverage
+        - Competitor headings → content gap analysis
+
+        Returns formatted context string for the outline prompt, or empty
+        string if no SERP backend is configured.
+        """
+        keyword = article.target_keyword or ""
+        if not keyword:
+            return ""
+
+        try:
+            analyzer = SerpAnalyzer(
+                serpapi_key=self.config.serp.serpapi_key,
+                google_cse_key=self.config.serp.google_cse_key,
+                google_cse_id=self.config.serp.google_cse_id,
+            )
+            state = article.target_state or ""
+            insight = analyzer.analyze(keyword, state=state)
+            context = insight.to_outline_context()
+            if context:
+                logger.info(
+                    f"SERP context for '{keyword}': {len(insight.paa_questions)} PAA, "
+                    f"{len(insight.related_searches)} related, "
+                    f"{len(insight.competitor_headings)} headings"
+                )
+            return context
+        except Exception as e:
+            logger.warning(f"SERP analysis failed for '{keyword}': {e}")
+            return ""
+
+    # ------------------------------------------------------------------
+    # Phase 0c: Vehicle data enrichment (NHTSA)
+    # ------------------------------------------------------------------
+    def _get_nhtsa_context(self, article) -> str:
+        """Pull NHTSA vehicle data if the keyword references a specific vehicle.
+
+        Uses the free NHTSA API to get recalls and complaints data for
+        vehicle-specific articles. This government data is a strong E-E-A-T
+        signal that competitors rarely include.
+
+        Returns formatted context string for the outline prompt, or empty
+        string if the keyword doesn't reference a specific vehicle.
+        """
+        keyword = article.target_keyword or ""
+        if not keyword:
+            return ""
+
+        try:
+            context = enrich_vehicle_article(keyword)
+            if context:
+                logger.info(f"NHTSA enrichment found for '{keyword}'")
+            return context or ""
+        except Exception as e:
+            logger.warning(f"NHTSA enrichment failed for '{keyword}': {e}")
+            return ""
+
+    # ------------------------------------------------------------------
     # Phase 1: Outline generation
     # ------------------------------------------------------------------
     def _generate_outline(
         self, article, product_context: str, state_rules: str,
         internal_links: str, entity_map: str = "",
         revision_feedback: str = "",
+        serp_context: str = "",
+        nhtsa_context: str = "",
     ) -> str:
         """Generate a structured outline before writing.
 
@@ -554,6 +631,14 @@ SOURCES: source1, source2, source3"""
                 f"{revision_feedback[-1500:]}\n"
             )
 
+        serp_section = ""
+        if serp_context:
+            serp_section = f"\n{serp_context}\n"
+
+        nhtsa_section = ""
+        if nhtsa_context:
+            nhtsa_section = f"\n{nhtsa_context}\n"
+
         prompt = f"""Create a detailed OUTLINE for an article targeting: "{article.target_keyword}"
 
 Content category: {article.content_category or 'general'}
@@ -564,7 +649,7 @@ Content category: {article.content_category or 'general'}
 {f'Category strategy: {category_hint}' if category_hint else ''}
 
 {f'Internal links available: {internal_links}' if internal_links else ''}
-{entity_section}{revision_section}
+{entity_section}{serp_section}{nhtsa_section}{revision_section}
 Create an outline with:
 1. **Hook** (first 100 words) — how to open with the keyword naturally
 2. **5-7 H2 sections** — each with:
@@ -1085,6 +1170,13 @@ Article:
                 content = injected
                 _, new_external = extract_links(content)
                 fixes.append(f"injected_{len(new_external) - len(external)}_external_links")
+
+        # Check 10: Freshness — replace stale year references with current year.
+        # Sage SEO deducts points for stale content; this auto-fixes the
+        # unambiguous cases ("as of 2023" → "as of {current_year}").
+        content, freshness_fixes = auto_fix_stale_years(content)
+        if freshness_fixes > 0:
+            fixes.append(f"fixed_{freshness_fixes}_stale_year_references")
 
         if fixes:
             logger.info(f"Self-review applied {len(fixes)} fixes: {fixes}")

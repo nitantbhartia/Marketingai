@@ -18,6 +18,7 @@ from content_quality.validators.product_validator import ProductClaimValidator
 from content_quality.validators.state_validator import StateRegulationValidator
 from pipeline.agents.base import BaseAgent, RateLimitError
 from pipeline.db import ArticleStatus
+from pipeline.utils.freshness import freshness_score as calc_freshness
 from pipeline.utils.readability import readability_report, word_count
 from pipeline.utils.seo import detect_faq_section, extract_links, score_seo
 
@@ -180,6 +181,22 @@ class SageAgent(BaseAgent):
         )
         # Scale: score_seo returns 0-20, normalize to 0-18
         seo_scaled = round(seo_raw * 18 / 20, 1)
+
+        # Freshness check — stale year references hurt rankings.
+        # Deduct up to 2 pts from SEO for poor freshness signals.
+        fresh = calc_freshness(content)
+        fresh_score = fresh["score"]  # 0-3 scale
+        freshness_deduction = 0.0
+        if fresh_score < 1.0:
+            freshness_deduction = 2.0
+        elif fresh_score < 2.0:
+            freshness_deduction = 1.0
+        elif fresh_score < 2.5:
+            freshness_deduction = 0.5
+        if freshness_deduction > 0:
+            seo_scaled = max(0, round(seo_scaled - freshness_deduction, 1))
+        seo_issues.extend(f"[Freshness] {i}" for i in fresh.get("issues", []))
+
         scores["seo"] = {"score": seo_scaled, "max": 18, "issues": seo_issues}
         total_score += seo_scaled
         all_issues.extend(seo_issues)
