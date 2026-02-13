@@ -270,8 +270,10 @@ class SageAgent(BaseAgent):
         fact_score = round(min(fact_score, 20.0) * 15 / 20, 1)
         # 4b. Math accuracy (3 pts from MathValidator)
         math_score, math_issues = self._check_math(content)
-        fact_total = fact_score + math_score
-        all_fact_issues = fact_issues + math_issues
+        # 4c. Content integrity (up to -5 pts for leaked metadata / truncation)
+        integrity_penalty, integrity_issues = self._check_content_integrity(content)
+        fact_total = max(0.0, fact_score + math_score - integrity_penalty)
+        all_fact_issues = fact_issues + math_issues + integrity_issues
         scores["factual_accuracy"] = {"score": fact_total, "max": 18, "issues": all_fact_issues}
         total_score += fact_total
         all_issues.extend(all_fact_issues)
@@ -911,6 +913,48 @@ Format each issue on its own line starting with "- "."""
             issues.append("No blockquote callouts — add Adjuster Insider tips for engagement")
 
         return round(score, 1), issues
+
+    # Patterns that indicate leaked LLM metadata in the article body.
+    _LEAKED_META_RE = re.compile(
+        r"(?:META_DESCRIPTION|META_TITLE|TITLE|SLUG|KEYWORD|CATEGORY|TARGET_STATE)\s*:",
+        re.IGNORECASE,
+    )
+    # Dangling prepositions / connectors at end of a sentence suggest truncation.
+    _DANGLING_END_RE = re.compile(
+        r"\b(?:from|with|like|such|for|about|including|between|through|using|into)\s*$"
+    )
+
+    def _check_content_integrity(self, content: str) -> tuple[float, list[str]]:
+        """Detect structural corruption: leaked metadata and truncated sentences.
+
+        Returns up to 5 penalty points (deducted from factual accuracy bucket).
+        """
+        issues: list[str] = []
+        penalty = 0.0
+
+        # 1. Raw metadata markers in body
+        for m in self._LEAKED_META_RE.finditer(content):
+            # Extract a short context snippet
+            start = max(0, m.start() - 30)
+            snippet = content[start:m.end() + 40].replace("\n", " ").strip()
+            issues.append(f"Leaked metadata in body: '...{snippet}...'")
+            penalty += 3.0  # Severe — means Quill emitted raw control text
+
+        # 2. Truncated sentences (sentence ends with a dangling preposition)
+        # Split on common sentence endings but keep the text before
+        sentences = re.split(r"(?<=[.!?])\s+|\n{2,}", content)
+        for sent in sentences:
+            sent = sent.strip()
+            if not sent or len(sent) < 10:
+                continue
+            # Check if the sentence ends abruptly (no terminal punctuation)
+            if sent[-1] not in ".!?:\"')":
+                if self._DANGLING_END_RE.search(sent):
+                    short = sent[-60:] if len(sent) > 60 else sent
+                    issues.append(f"Truncated sentence: '...{short}'")
+                    penalty += 1.5
+
+        return min(penalty, 5.0), issues
 
     def _check_legal_compliance(self, content: str) -> tuple[float, list[str]]:
         """Check for unauthorized legal advice."""
