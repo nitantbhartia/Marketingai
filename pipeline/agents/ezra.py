@@ -148,11 +148,36 @@ class EzraAgent(BaseAgent):
         self.logger.info(f"Publishing: {article.title}")
 
         try:
-            # Generate slug if not set
+            # Generate slug if not set — ensure uniqueness
             slug = article.slug or self._slugify(article.title)
+            slug = self._ensure_unique_slug(slug)
 
             # Resolve image placeholders to real URLs before publishing
             article = self._resolve_images(article)
+
+            # Reject if unresolved image placeholders remain
+            remaining_placeholders = len(
+                re.findall(r"!\[[^\]]*\]\(image:[^)]+\)", article.markdown_content or "")
+            )
+            if remaining_placeholders > 0:
+                self.logger.warning(
+                    f"  {remaining_placeholders} unresolved image placeholder(s) — "
+                    f"sending back to revision"
+                )
+                self.db.update_article(
+                    article_id,
+                    status=ArticleStatus.REVISION.value,
+                    publisher_claim="",
+                    revision_notes=(
+                        f"[EZRA] {remaining_placeholders} image placeholder(s) "
+                        f"could not be resolved. Remove or replace them."
+                    ),
+                )
+                return {
+                    "article_id": article_id,
+                    "success": False,
+                    "error": f"{remaining_placeholders} unresolved image placeholders",
+                }
 
             # Save markdown file
             markdown_path = self._save_markdown(article, slug)
@@ -166,8 +191,8 @@ class EzraAgent(BaseAgent):
             # Update index
             self._update_index(article, slug)
 
-            # Determine URL
-            published_url = f"{self.site_url}/blog/{slug}"
+            # Determine URL (normalize trailing slash)
+            published_url = f"{self.site_url.rstrip('/')}/blog/{slug}"
 
             # Update database
             self.db.update_article(
@@ -479,6 +504,19 @@ Article:
     <title>{{ meta_title }}</title>
     <meta name="description" content="{{ meta_description }}">
     <meta name="keywords" content="{{ target_keyword }}">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="{{ canonical_url }}">
+    <!-- Open Graph -->
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="{{ meta_title }}">
+    <meta property="og:description" content="{{ meta_description }}">
+    <meta property="og:url" content="{{ canonical_url }}">
+    {% if og_image %}<meta property="og:image" content="{{ og_image }}">{% endif %}
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ meta_title }}">
+    <meta name="twitter:description" content="{{ meta_description }}">
+    {% if og_image %}<meta name="twitter:image" content="{{ og_image }}">{% endif %}
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -531,12 +569,24 @@ Article:
 </html>
 """)
 
+        # Extract first image URL from content for og:image
+        og_image = ""
+        img_match = re.search(r'<img[^>]+src="([^"]+)"', html_content)
+        if not img_match:
+            img_match = re.search(r"!\[[^\]]*\]\(([^)]+)\)", article.markdown_content or "")
+        if img_match:
+            og_image = img_match.group(1)
+
+        canonical_url = f"{self.site_url.rstrip('/')}/blog/{slug}"
+
         html = template.render(
             meta_title=article.meta_title or article.title,
             meta_description=article.meta_description or "",
             target_keyword=article.target_keyword or "",
             title=article.title,
             content=html_content,
+            canonical_url=canonical_url,
+            og_image=og_image,
             primary_cta=primary_cta,
             secondary_cta=secondary_cta,
             newsletter_cta=newsletter_cta,
@@ -569,7 +619,10 @@ Article:
             "published_at": datetime.now().isoformat(),
         })
 
-        index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
+        # Atomic write: write to temp file first, then rename
+        tmp_path = index_path.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
+        tmp_path.replace(index_path)
 
         self.logger.info(f"  Updated index: {index_path}")
 
@@ -585,3 +638,16 @@ Article:
         text = re.sub(r'[-\s]+', '-', text)
         text = text.strip('-')
         return text[:80]
+
+    def _ensure_unique_slug(self, slug: str) -> str:
+        """Append a numeric suffix if slug already exists among published articles."""
+        published = self.db.get_published_articles()
+        existing_slugs = {a.slug for a in published if a.slug}
+        if slug not in existing_slugs:
+            return slug
+        for i in range(2, 100):
+            candidate = f"{slug[:76]}-{i}"
+            if candidate not in existing_slugs:
+                self.logger.info(f"  Slug '{slug}' taken, using '{candidate}'")
+                return candidate
+        return f"{slug[:70]}-{hash(slug) % 10000}"

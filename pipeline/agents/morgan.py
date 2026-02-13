@@ -37,6 +37,12 @@ class MorganAgent(BaseAgent):
         # Meta-learning: is the learning system itself working?
         checks["learning_health"] = self._assess_learning_health()
 
+        # Release stale claim locks (agents that crashed mid-processing)
+        cleared = self.db.clear_stale_claims(hours=24)
+        if cleared:
+            logger.info(f"Released {cleared} stale claim lock(s)")
+            checks["stale_claims"] = {"cleared": cleared, "alert": f"{cleared} stale claim(s) released"}
+
         # Decay old lessons so stale patterns fade
         decayed = self.db.decay_lessons(older_than_days=30)
         if decayed:

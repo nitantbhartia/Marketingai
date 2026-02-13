@@ -29,9 +29,13 @@ class ScoutAgent(BaseAgent):
         existing_count = self.db.count_articles(ArticleStatus.BACKLOG.value)
         logger.info(f"Current backlog: {existing_count} topics")
 
-        # Get existing keywords to avoid duplicates
+        # Get existing keywords to avoid duplicates and cannibalization
         all_articles = self.db.query_articles(limit=5000)
         existing_keywords = {a.target_keyword.lower() for a in all_articles if a.target_keyword}
+        # Build normalized word-set index for cannibalization detection
+        existing_word_sets = {
+            kw: frozenset(kw.split()) for kw in existing_keywords
+        }
 
         # Phase 1: Seed topics (always available, no API needed)
         topics = get_all_seed_topics()
@@ -42,6 +46,25 @@ class ScoutAgent(BaseAgent):
             kw = topic["keyword"]
             if kw.lower() in existing_keywords:
                 skipped += 1
+                continue
+            # Cannibalization check: if the new keyword's words overlap 85%+
+            # with an existing keyword, they target the same search intent.
+            kw_words = frozenset(kw.lower().split())
+            is_cannibal = False
+            for ex_kw, ex_words in existing_word_sets.items():
+                if not kw_words or not ex_words:
+                    continue
+                overlap = len(kw_words & ex_words)
+                similarity = overlap / max(len(kw_words), len(ex_words))
+                if similarity >= 0.85 and kw.lower() != ex_kw:
+                    logger.info(
+                        f"Skipping '{kw}' — cannibalizes existing '{ex_kw}' "
+                        f"({similarity:.0%} word overlap)"
+                    )
+                    is_cannibal = True
+                    skipped += 1
+                    break
+            if is_cannibal:
                 continue
 
             # Generate content brief

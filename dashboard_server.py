@@ -65,7 +65,7 @@ async def dashboard(request: Request):
                 SELECT id, title, slug, target_keyword, target_state,
                        status, sage_score, seo_score, readability_score,
                        validation_status, validation_notes,
-                       word_count, created_at, updated_at,
+                       word_count, revision_count, created_at, updated_at,
                        writer_claim, editor_claim
                 FROM articles
                 WHERE status IN ('editor_review', 'review', 'ready_to_publish', 'revision',
@@ -100,8 +100,10 @@ async def dashboard(request: Request):
             from pipeline.config import Config
             cfg = Config.load()
             approval_threshold = cfg.pipeline.approval_score_threshold
+            max_revision_rounds = cfg.pipeline.max_revision_rounds
         except Exception:
-            approval_threshold = 90
+            approval_threshold = 80
+            max_revision_rounds = 5
 
         # Get recent rate limit events (last 24 hours)
         rate_limit_count = 0
@@ -121,6 +123,7 @@ async def dashboard(request: Request):
             "articles": articles,
             "status_counts": status_counts,
             "approval_threshold": approval_threshold,
+            "max_revision_rounds": max_revision_rounds,
             "rate_limit_count": rate_limit_count,
             "recent_notifications": recent_notifications[-10:],  # Last 10
             "now": datetime.now()
@@ -239,6 +242,11 @@ async def review_article(request: Request, article_id: int):
         ("amplified", "Amplified"),
     ]
 
+    try:
+        max_revision_rounds = cfg.pipeline.max_revision_rounds
+    except Exception:
+        max_revision_rounds = 5
+
     return templates.TemplateResponse("article_review.html", {
         "request": request,
         "article": article_dict,
@@ -248,6 +256,7 @@ async def review_article(request: Request, article_id: int):
         "cta_variants": cta_variants,
         "word_count": word_count,
         "approval_threshold": approval_threshold,
+        "max_revision_rounds": max_revision_rounds,
         "lifecycle_stages": lifecycle_stages,
     })
 

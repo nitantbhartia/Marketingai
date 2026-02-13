@@ -116,6 +116,28 @@ def score_seo(
     else:
         issues.append("No FAQ section")
 
+    # Keyword density check (2 pts) — target 0.5%-3% of total words
+    if keyword:
+        kw_lower = keyword.lower()
+        words = content.lower().split()
+        total_words = len(words) if words else 1
+        # Count keyword occurrences (all words present in a window)
+        kw_parts = kw_lower.split()
+        kw_count = content.lower().count(kw_lower) if len(kw_parts) == 1 else sum(
+            1 for i in range(len(words) - len(kw_parts) + 1)
+            if all(kw_parts[j] in words[i + j] for j in range(len(kw_parts)))
+        )
+        density = (kw_count * len(kw_parts)) / total_words * 100 if total_words else 0
+        if 0.5 <= density <= 3.0:
+            score += 2
+        elif 0.3 <= density <= 4.0:
+            score += 1
+            issues.append(f"Keyword density {density:.1f}% (target 0.5-3%)")
+        elif density < 0.3:
+            issues.append(f"Keyword density too low: {density:.1f}% (target 0.5-3%)")
+        else:
+            issues.append(f"Keyword stuffing: density {density:.1f}% (target 0.5-3%)")
+
     return score, issues
 
 

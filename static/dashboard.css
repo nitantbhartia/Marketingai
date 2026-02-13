@@ -435,6 +435,39 @@ body {
     color: var(--gray-700);
 }
 
+.badge-revision-round {
+    background: var(--warning);
+    color: #fff;
+    font-weight: 600;
+}
+
+.badge-rejection-warning {
+    background: var(--danger);
+    color: #fff;
+}
+
+.badge-danger-pulse {
+    background: var(--danger);
+    color: #fff;
+    font-weight: 600;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Revision round headers */
+.revision-round { margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--gray-200); }
+.revision-round:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.revision-round-header { font-weight: 600; font-size: 0.8125rem; color: var(--primary); margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* Revision diff view */
+.diff-container { margin-top: 0.75rem; }
+.diff-added { background: #d4edda; color: #155724; padding: 0.125rem 0.25rem; border-radius: 2px; }
+.diff-removed { background: #f8d7da; color: #721c24; padding: 0.125rem 0.25rem; border-radius: 2px; text-decoration: line-through; }
+
 .article-title {
     font-size: 1.25rem;
     font-weight: 600;

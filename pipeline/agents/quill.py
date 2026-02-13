@@ -49,7 +49,48 @@ car owners navigate the nightmare of lowball total loss insurance settlements.
 6. ACTIVE VOICE ONLY: "The adjuster denied the claim" not "The claim was denied by the adjuster."
 7. SHORT WORDS: "Get" not "obtain." "Show" not "demonstrate." "Use" not "utilize." "Help" not "facilitate."
 
-### Structural Requirements
+### Article Structure (Conversion-Focused — FOLLOW THIS EXACTLY)
+Your reader just got a lowball offer. They're stressed, maybe angry, probably on their phone
+at 11pm. They want to know "am I getting screwed and what do I do right now." Every extra
+paragraph is a chance for them to bounce. Keep it tight.
+
+**Strict word limit: 1200-1500 words. Never exceed 1500.**
+
+Follow this structure:
+
+1. **Hook** (~50 words): Lead with a specific dollar amount they're losing.
+   Example: "Your insurer left $1,700 off your offer. Here's how."
+
+2. **The problem + emotional validation** (~200 words): Acknowledge their frustration.
+   Explain WHY insurers lowball. Make them feel seen, not lectured.
+   → **FIRST CTA HERE** (within 300 words): The reader just learned their offer is probably
+     missing $1,500-$3,000 in line items. They're activated. Hit them now.
+     Example: "See what's missing from your offer in 5 minutes — [check your settlement free](https://claimcoach.app)"
+
+3. **The specific line items they miss** (~400 words): Sales tax, registration, dealer fees,
+   aftermarket parts, condition adjustments. Use bullets. Bold the dollar amounts.
+   → **CONTEXTUAL CTA**: After listing items, naturally link to ClaimCoach.
+     Example: "[ClaimCoach checks all of these automatically](https://claimcoach.app)"
+
+4. **State-specific rules** (~300 words, if applicable): What their state requires.
+   → **CONTEXTUAL CTA**: "Get your [state]-specific analysis [here](https://claimcoach.app)"
+
+5. **What to do next** (~200 words): 3-5 concrete action steps. Numbered list.
+
+6. **FAQ** (~250 words, 3-4 questions for schema markup, use ### for each question)
+   → **FINAL CTA**: End the last FAQ answer with a natural ClaimCoach link.
+
+**Total: ~1200-1500 words, 4 CTAs. Reader hits the first one before they've scrolled twice.**
+
+### CTA Rules
+- 4 CTAs per article (1 early, 2 contextual, 1 closing)
+- NEVER use salesy banner language. CTAs must feel like helpful suggestions.
+- Always link to https://claimcoach.app — never make up feature-specific URLs
+- Vary the CTA copy. Don't repeat the same line 4 times.
+- Good: "Want to see which ones apply to your offer? [ClaimCoach checks this automatically.](https://claimcoach.app)"
+- Bad: "Click here to try ClaimCoach!" (too pushy)
+
+### Callouts
 - Use "Adjuster Insider" Callouts: Use Markdown blockquotes (> ) for tips that a standard
   insurance company wouldn't want a policyholder to know. Prefix with **Adjuster Insider:**
   Example: > **Adjuster Insider:** Most adjusters have authority to increase offers by 10-15%
@@ -58,14 +99,10 @@ car owners navigate the nightmare of lowball total loss insurance settlements.
   Replacement Cost, Actual Cash Value) within the first 100 words.
 - "Why This Matters to Your Wallet": For every technical fact, add one sentence explaining
   the dollar impact. Don't just say what something is — say what it costs the reader.
-- 1800-2200 words, H2 headers every 200-300 words
-- At least one actionable takeaway per section
-- FAQ section with 3-5 questions (use ### for each question for schema markup)
 - Include specific dollar amounts, ranges, and real data where possible
-- End with clear CTA pointing to ClaimCoach
 
-### Image Placeholders (REQUIRED — 2-4 per article)
-Include 2-4 image placeholders throughout the article using this format:
+### Image Placeholders (REQUIRED — 1-2 per article)
+Include 1-2 image placeholders throughout the article using this format:
   ![Descriptive alt text with keyword](image:short-slug-description)
 Rules:
 - Alt text MUST be descriptive (10+ words) and include the target keyword or a close variant
@@ -1041,26 +1078,13 @@ Article:
                     )
                     fixes.append("inserted_keyword_first_100_words")
 
-        # Check 2: CTA with ClaimCoach mention
+        # Check 2: CTA placement — 4 CTAs (1 early, 2 contextual, 1 closing)
         content_lower = content.lower()
-        if "claimcoach" not in content_lower:
-            content += (
-                "\n\n## Take the Next Step\n\n"
-                "Don't leave money on the table. "
-                "[ClaimCoach](https://claimcoach.app) analyzes your total loss "
-                "settlement and shows you exactly where the insurance company "
-                "is shortchanging you — so you can fight back with real data."
-            )
-            fixes.append("added_claimcoach_cta")
-        elif "claimcoach.app" not in content_lower:
-            # ClaimCoach mentioned but no link — add link to the last mention
-            content = re.sub(
-                r"(?i)(ClaimCoach)(?![\w.])",
-                r"[\1](https://claimcoach.app)",
-                content,
-                count=1,
-            )
-            fixes.append("added_claimcoach_link")
+        cta_count = len(re.findall(r"claimcoach\.app", content_lower))
+
+        if cta_count < 4:
+            content, cta_fixes = self._ensure_four_ctas(content, keyword)
+            fixes.extend(cta_fixes)
 
         # Check 3: FAQ section present
         if not detect_faq_section(content):
@@ -1185,6 +1209,147 @@ Article:
             logger.info(f"Self-review applied {len(fixes)} fixes: {fixes}")
 
         return content, meta_description, fixes
+
+    @staticmethod
+    def _ensure_four_ctas(content: str, keyword: str) -> tuple[str, list[str]]:
+        """Ensure the article has 4 strategically placed CTAs.
+
+        Strategy:
+        1. Early CTA — within first 300 words (after emotional hook/problem)
+        2. Contextual CTA — after line-items/mid-body section
+        3. Contextual CTA — after state-rules/second-body section
+        4. Closing CTA — in or after FAQ section
+
+        Returns (modified_content, list_of_fixes).
+        """
+        fixes: list[str] = []
+        content_lower = content.lower()
+
+        # Count existing CTA links
+        cta_positions = [
+            m.start() for m in re.finditer(r"claimcoach\.app", content_lower)
+        ]
+
+        # Split content into words for position tracking
+        words = content.split()
+        total_words = len(words)
+
+        # CTA copy variants (varied, not repetitive)
+        cta_variants = [
+            (
+                "\n\n> See what's missing from your offer in 5 minutes — "
+                "[check your settlement free](https://claimcoach.app).\n"
+            ),
+            (
+                "\n\n[ClaimCoach checks all of these line items automatically]"
+                "(https://claimcoach.app) — upload your offer and see what "
+                "they left out.\n"
+            ),
+            (
+                "\n\nGet your state-specific settlement analysis at "
+                "[ClaimCoach](https://claimcoach.app) — it takes 5 minutes.\n"
+            ),
+            (
+                "\n\nDon't leave money on the table. "
+                "[ClaimCoach](https://claimcoach.app) analyzes your settlement "
+                "and shows you exactly where the insurer shortchanged you.\n"
+            ),
+        ]
+
+        # If no ClaimCoach mention at all, treat all zones as missing
+        if "claimcoach" not in content_lower:
+            cta_positions = []
+
+        # Check which zones already have CTAs
+        total_chars = len(content)
+        # Zone boundaries (character positions)
+        early_end = 0
+        # Find the char position of the 300th word
+        word_idx = 0
+        for i, ch in enumerate(content):
+            if ch in (" ", "\n"):
+                word_idx += 1
+                if word_idx >= 300:
+                    early_end = i
+                    break
+        if early_end == 0:
+            early_end = int(total_chars * 0.2)
+
+        mid_start = int(total_chars * 0.25)
+        mid_end = int(total_chars * 0.55)
+        late_start = int(total_chars * 0.55)
+        late_end = int(total_chars * 0.80)
+        closing_start = int(total_chars * 0.80)
+
+        has_early = any(p < early_end for p in cta_positions)
+        has_mid = any(mid_start <= p <= mid_end for p in cta_positions)
+        has_late = any(late_start <= p <= late_end for p in cta_positions)
+        has_closing = any(p >= closing_start for p in cta_positions)
+
+        needed: list[tuple[int, str]] = []  # (variant_idx, zone)
+        if not has_early:
+            needed.append((0, "early"))
+        if not has_mid:
+            needed.append((1, "mid"))
+        if not has_late:
+            needed.append((2, "late"))
+        if not has_closing:
+            needed.append((3, "closing"))
+
+        if not needed:
+            return content, fixes
+
+        # Inject missing CTAs at appropriate positions
+        h2_positions = [m.start() for m in re.finditer(r"\n##\s", content)]
+
+        # Build insertion points per zone
+        for variant_idx, zone in needed:
+            cta_text = cta_variants[variant_idx]
+            insert_pos = None
+
+            if zone == "early":
+                # After the first H2 section (end of "problem" section)
+                if len(h2_positions) >= 2:
+                    insert_pos = h2_positions[1]
+                else:
+                    # Fallback: after first ~300 words
+                    insert_pos = early_end
+
+            elif zone == "mid":
+                # After the second or third H2 section
+                if len(h2_positions) >= 4:
+                    insert_pos = h2_positions[3]
+                elif len(h2_positions) >= 3:
+                    insert_pos = h2_positions[2]
+                else:
+                    insert_pos = int(total_chars * 0.4)
+
+            elif zone == "late":
+                # After the state-rules section (around 60-75%)
+                if len(h2_positions) >= 5:
+                    insert_pos = h2_positions[4]
+                else:
+                    insert_pos = int(total_chars * 0.65)
+
+            elif zone == "closing":
+                # At the very end of the article
+                insert_pos = len(content)
+
+            if insert_pos is not None:
+                if insert_pos >= len(content):
+                    content += cta_text
+                else:
+                    # Insert before the next section heading
+                    content = content[:insert_pos] + cta_text + content[insert_pos:]
+                    # Adjust h2_positions for subsequent insertions
+                    offset = len(cta_text)
+                    h2_positions = [
+                        p + offset if p >= insert_pos else p
+                        for p in h2_positions
+                    ]
+                fixes.append(f"injected_{zone}_cta")
+
+        return content, fixes
 
     @staticmethod
     def _inject_internal_links(
@@ -1559,10 +1724,44 @@ Article:
                 model=self.utility_model,
                 max_tokens=800,
             )
-            return result.strip()
+            faq = result.strip()
+            # Validate FAQ structure: need H3 questions with answers
+            if not self._validate_faq_structure(faq):
+                logger.warning("Generated FAQ failed structure validation, discarding")
+                return ""
+            return faq
         except Exception as e:
             logger.warning(f"FAQ generation failed: {e}")
             return ""
+
+    @staticmethod
+    def _validate_faq_structure(faq_text: str) -> bool:
+        """Validate FAQ has proper Q&A structure.
+
+        Requirements:
+        - At least 2 H3 headers (### Question?)
+        - Each question should end with '?'
+        - Each answer should be at least 30 chars
+        """
+        if not faq_text:
+            return False
+        h3_pattern = re.compile(r"^###\s+(.+)$", re.MULTILINE)
+        questions = h3_pattern.findall(faq_text)
+        if len(questions) < 2:
+            return False
+        # Check questions end with ?
+        valid_qs = sum(1 for q in questions if q.strip().endswith("?"))
+        if valid_qs < 2:
+            return False
+        # Check answers exist between questions
+        sections = re.split(r"^###\s+", faq_text, flags=re.MULTILINE)
+        for section in sections[1:]:  # skip text before first ###
+            # After the question line, the answer follows
+            lines = section.split("\n", 1)
+            answer = lines[1].strip() if len(lines) > 1 else ""
+            if len(answer) < 30:
+                return False
+        return True
 
     def _generate_meta(self, article) -> str:
         """Generate a meta description using Flash-Lite (utility tier)."""
@@ -1594,7 +1793,8 @@ Article:
     # cannot meet the approval threshold.
     # ------------------------------------------------------------------
 
-    MIN_WORD_COUNT = 1500
+    MIN_WORD_COUNT = 1000
+    MAX_WORD_COUNT = 1500
     MIN_READABILITY = 40
 
     def _passes_minimum_bar(self, content: str, wc: int) -> tuple[bool, str]:
@@ -1606,6 +1806,8 @@ Article:
         reasons = []
         if wc < self.MIN_WORD_COUNT:
             reasons.append(f"Word count {wc} below minimum {self.MIN_WORD_COUNT}")
+        if wc > self.MAX_WORD_COUNT:
+            reasons.append(f"Word count {wc} exceeds maximum {self.MAX_WORD_COUNT}")
 
         report = readability_report(content)
         if report["flesch_kincaid"] < self.MIN_READABILITY:
@@ -1665,6 +1867,8 @@ Article:
                 "blockquote", "callout",
                 # CTA placement issues
                 "no mid-article", "closing section",
+                "no cta in first", "only 1 cta", "only 2 cta", "only 3 cta",
+                "first 300 words", "need 4 cta", "target: 4",
             )):
                 targeted.append(issue)
             else:
@@ -1683,7 +1887,8 @@ Article:
             f"{len(broad)} broad issues"
         )
 
-        content = article.markdown_content
+        original_content = article.markdown_content
+        content = original_content
         meta = article.meta_description or ""
 
         # Apply targeted fixes
@@ -1721,6 +1926,28 @@ Article:
                 return None  # Fall through to full rewrite
 
         try:
+            # Verify the revision actually changed the content
+            if original_content and content.strip() == original_content.strip():
+                logger.warning(
+                    f"Targeted revision of {article.id} produced identical content — "
+                    f"falling through to full rewrite"
+                )
+                return None
+
+            # Check minimum change threshold (at least 5% different)
+            if original_content:
+                overlap = sum(
+                    1 for a, b in zip(content, original_content) if a == b
+                )
+                max_len = max(len(content), len(original_content), 1)
+                similarity = overlap / max_len
+                if similarity > 0.95:
+                    logger.warning(
+                        f"Targeted revision of {article.id} changed <5% of content — "
+                        f"falling through to full rewrite"
+                    )
+                    return None
+
             slug = self._generate_slug(
                 article.suggested_title or article.title or article.target_keyword.title()
             )

@@ -202,6 +202,21 @@ class SageAgent(BaseAgent):
             seo_scaled = max(0, round(seo_scaled - freshness_deduction, 1))
         seo_issues.extend(f"[Freshness] {i}" for i in fresh.get("issues", []))
 
+        # Header hierarchy check — H1 → H2 → H3 (no skipping levels)
+        heading_pattern = re.compile(r"^(#{1,6})\s+", re.MULTILINE)
+        heading_levels = [len(m.group(1)) for m in heading_pattern.finditer(content)]
+        hierarchy_ok = True
+        for i in range(1, len(heading_levels)):
+            if heading_levels[i] > heading_levels[i - 1] + 1:
+                hierarchy_ok = False
+                seo_issues.append(
+                    f"Heading hierarchy skip: H{heading_levels[i-1]} → H{heading_levels[i]} "
+                    f"(missing H{heading_levels[i-1]+1})"
+                )
+                break
+        if not hierarchy_ok:
+            seo_scaled = max(0, round(seo_scaled - 1.0, 1))
+
         scores["seo"] = {"score": seo_scaled, "max": 18, "issues": seo_issues}
         total_score += seo_scaled
         all_issues.extend(seo_issues)
@@ -666,7 +681,7 @@ Article excerpt:
 Title: {article.title}
 Target State: {article.target_state}
 
-{content[:3000]}
+{self._sample_content_sections(content)}
 
 List ONLY factual errors or unauthorized claims. If none found, respond with "NO ISSUES".
 Format each issue on its own line starting with "- "."""
@@ -680,65 +695,97 @@ Format each issue on its own line starting with "- "."""
         if "NO ISSUES" in result.upper():
             return []
 
-        issues = []
+        issues: list[str] = []
         for line in result.strip().split("\n"):
             line = line.strip()
             if line.startswith("- "):
                 issues.append(f"AI fact check: {line[2:]}")
         return issues
 
-    def _check_cta(self, content: str) -> tuple[float, list[str]]:
-        """Check for ClaimCoach CTA — placement-aware scoring.
+    @staticmethod
+    def _sample_content_sections(content: str, budget: int = 4000) -> str:
+        """Sample first, middle, and last sections of content for fact checking.
 
-        Scores for presence, link, and strategic placement:
-        - Mention exists (1 pt)
-        - Link to claimcoach.app (1 pt)
-        - CTA in closing section (1 pt)
-        - Mid-article mention or CTA (1 pt)
+        For articles under *budget* chars, returns the full text.  For longer
+        articles, returns ~1500 chars from the start, ~1500 from the middle,
+        and ~1000 from the end with "[...]" markers between sections.
+        """
+        if len(content) <= budget:
+            return content
+        first = content[:1500]
+        mid_start = len(content) // 2 - 750
+        middle = content[mid_start:mid_start + 1500]
+        last = content[-1000:]
+        return f"{first}\n\n[... middle section ...]\n\n{middle}\n\n[... end section ...]\n\n{last}"
+
+    def _check_cta(self, content: str) -> tuple[float, list[str]]:
+        """Check for ClaimCoach CTA — conversion-focused 4-CTA scoring.
+
+        Scores for presence, early placement, and distribution:
+        - ClaimCoach linked (not just mentioned) (1 pt)
+        - Early CTA within first 300 words (1.5 pts)
+        - 3+ CTA links spread across the article (1.5 pts)
         - Benefit-driven CTA copy, not just brand mention (1 pt)
         """
         issues: list[str] = []
         score = 0.0
 
         content_lower = content.lower()
-        lines = content.split("\n")
 
-        # 1 pt: ClaimCoach mentioned at all
-        if "claimcoach" in content_lower:
-            score += 1
-        else:
-            issues.append("No mention of ClaimCoach")
-            return score, issues  # No CTA at all — remaining checks moot
+        # Find all CTA link positions
+        cta_links = [
+            m.start() for m in re.finditer(r"claimcoach\.app", content_lower)
+        ]
 
-        # 1 pt: Link to claimcoach.app
-        if "claimcoach.app" in content_lower:
+        # 1 pt: At least one linked CTA (claimcoach.app, not just brand name)
+        if cta_links:
             score += 1
+        elif "claimcoach" in content_lower:
+            issues.append("ClaimCoach mentioned but no link to claimcoach.app")
+            # Still check benefit copy below, but other placement checks need links
         else:
-            issues.append("No link to claimcoach.app")
+            issues.append("No mention of ClaimCoach — need 4 CTAs linking to claimcoach.app")
+            return score, issues
 
-        # 1 pt: CTA in closing section (last 20% of article)
-        total_chars = len(content)
-        closing_start = int(total_chars * 0.8)
-        closing_section = content_lower[closing_start:]
-        if "claimcoach" in closing_section:
-            score += 1
-        else:
-            issues.append("No ClaimCoach CTA in closing section (last 20% of article)")
+        # 1.5 pts: Early CTA within first 300 words
+        # Find character position of the 300th word
+        words = content.split()
+        early_char_limit = 0
+        for i, w in enumerate(words):
+            early_char_limit += len(w) + 1
+            if i >= 300:
+                break
+        if not early_char_limit:
+            early_char_limit = int(len(content) * 0.2)
 
-        # 1 pt: Mid-article mention (between 25%-75% of article)
-        mid_start = int(total_chars * 0.25)
-        mid_end = int(total_chars * 0.75)
-        mid_section = content_lower[mid_start:mid_end]
-        if "claimcoach" in mid_section:
-            score += 1
+        has_early = any(p < early_char_limit for p in cta_links)
+        if has_early:
+            score += 1.5
         else:
-            issues.append("No mid-article ClaimCoach mention (add subtle reference in body)")
+            issues.append(
+                "No CTA in first 300 words — place first CTA after the emotional "
+                "hook/problem section to catch activated readers"
+            )
+
+        # 1.5 pts: At least 3 CTA links spread across the article
+        if len(cta_links) >= 4:
+            score += 1.5
+        elif len(cta_links) >= 3:
+            score += 1.0
+            issues.append(f"Only {len(cta_links)} CTAs (target: 4 — early, 2 contextual, closing)")
+        elif len(cta_links) >= 2:
+            score += 0.5
+            issues.append(f"Only {len(cta_links)} CTAs (target: 4)")
+        else:
+            issues.append(f"Only {len(cta_links)} CTA link(s) — need 4 spread across the article")
 
         # 1 pt: Benefit-driven CTA copy (not just brand name)
         benefit_patterns = [
             r"claimcoach\s+(?:analyzes?|shows?|helps?|identifies?|checks?)",
             r"(?:try|use|check out|visit|get started with)\s+claimcoach",
             r"claimcoach\.app\)?\s*(?:to|and|—|–|-)\s+\w+",
+            r"(?:see|find|check)\s+(?:what|which|how).*claimcoach",
+            r"claimcoach.*(?:free|minutes?|automatically)",
         ]
         has_benefit = any(
             re.search(p, content_lower) for p in benefit_patterns
@@ -982,8 +1029,8 @@ Format each issue on its own line starting with "- "."""
         quill_perf = self.db.get_lessons("quill", category="performance")
 
         calibration: dict[str, Any] = {
-            "word_count_target": (1800, 2200),  # default
-            "word_count_ok": (1500, 2500),       # default acceptable range
+            "word_count_target": (1200, 1500),  # default — conversion-focused
+            "word_count_ok": (1000, 1600),       # default acceptable range
         }
 
         for lesson in quill_perf:

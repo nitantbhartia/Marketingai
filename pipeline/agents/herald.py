@@ -243,6 +243,17 @@ FACEBOOK:
         if current_section:
             content[current_section] = "\n".join(current_lines).strip()
 
+        # Validate Twitter thread: each tweet must be ≤280 chars
+        if content.get("twitter"):
+            tweets = [t.strip() for t in content["twitter"].split("---") if t.strip()]
+            validated = []
+            for tweet in tweets:
+                if len(tweet) > 280:
+                    logger.warning(f"Tweet truncated from {len(tweet)} to 280 chars")
+                    tweet = tweet[:277] + "..."
+                validated.append(tweet)
+            content["twitter"] = "\n---\n".join(validated)
+
         return content
 
     def _template_social_content(self, article) -> dict:
