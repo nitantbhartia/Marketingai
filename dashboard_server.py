@@ -169,6 +169,15 @@ async def review_article(request: Request, article_id: int):
 
     article_dict = dict(article)
 
+    # Render markdown to HTML for the preview tab
+    rendered_html = ""
+    if article_dict.get("markdown_content"):
+        try:
+            from content_quality.utils.text_utils import markdown_to_html
+            rendered_html = markdown_to_html(article_dict["markdown_content"])
+        except Exception:
+            rendered_html = ""
+
     # Parse validation notes
     validation_notes = []
     if article_dict.get("validation_notes"):
@@ -233,6 +242,7 @@ async def review_article(request: Request, article_id: int):
     return templates.TemplateResponse("article_review.html", {
         "request": request,
         "article": article_dict,
+        "rendered_html": rendered_html,
         "validation_notes": validation_notes,
         "history": history,
         "cta_variants": cta_variants,

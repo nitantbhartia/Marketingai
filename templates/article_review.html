@@ -105,26 +105,28 @@
 
                     <!-- Content Preview -->
                     <div class="review-section">
-                        <h2 class="section-heading">Content Preview</h2>
-                        <div class="content-preview">
-                            {{ article.markdown_content|truncate(2000) if article.markdown_content else 'No content available' }}
+                        <div class="preview-header">
+                            <h2 class="section-heading">Content Preview</h2>
+                            <div class="preview-tabs">
+                                <button class="preview-tab preview-tab-active" id="tabRendered" onclick="switchPreviewTab('rendered')">Rendered</button>
+                                <button class="preview-tab" id="tabSource" onclick="switchPreviewTab('source')">Markdown</button>
+                            </div>
                         </div>
-                        {% if article.markdown_content and article.markdown_content|length > 2000 %}
-                        <button class="btn btn-secondary btn-sm" onclick="showFullContent()">
-                            Show Full Content
-                        </button>
-                        {% endif %}
-                    </div>
 
-                    <!-- Full Content (Hidden) -->
-                    {% if article.markdown_content %}
-                    <div id="fullContent" class="review-section" style="display: none;">
-                        <h2 class="section-heading">Full Content</h2>
-                        <div class="content-full">
-                            {{ article.markdown_content }}
+                        <!-- Rendered HTML view (default) -->
+                        <div id="previewRendered" class="content-rendered">
+                            {% if rendered_html %}
+                            {{ rendered_html|safe }}
+                            {% else %}
+                            <p class="no-content">No content available</p>
+                            {% endif %}
+                        </div>
+
+                        <!-- Raw markdown source view -->
+                        <div id="previewSource" class="content-preview" style="display: none;">
+                            {{ article.markdown_content if article.markdown_content else 'No content available' }}
                         </div>
                     </div>
-                    {% endif %}
 
                     <!-- Validation Notes -->
                     {% if validation_notes %}
@@ -415,6 +417,24 @@
     <script src="/static/dashboard.js"></script>
     <script>
         const articleId = {{ article.id }};
+
+        function switchPreviewTab(tab) {
+            const rendered = document.getElementById('previewRendered');
+            const source = document.getElementById('previewSource');
+            const tabRendered = document.getElementById('tabRendered');
+            const tabSource = document.getElementById('tabSource');
+            if (tab === 'rendered') {
+                rendered.style.display = '';
+                source.style.display = 'none';
+                tabRendered.classList.add('preview-tab-active');
+                tabSource.classList.remove('preview-tab-active');
+            } else {
+                rendered.style.display = 'none';
+                source.style.display = '';
+                tabRendered.classList.remove('preview-tab-active');
+                tabSource.classList.add('preview-tab-active');
+            }
+        }
     </script>
 </body>
 </html>
