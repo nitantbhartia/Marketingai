@@ -118,12 +118,102 @@ def word_count(text: str) -> int:
     return len(words)
 
 
+def passive_voice_ratio(text: str) -> float:
+    """Estimate fraction of sentences that use passive voice.
+
+    Looks for common passive constructions: "was/were/is/are/been/being + past participle".
+    Returns a ratio between 0.0 and 1.0.
+    """
+    clean = _strip_markdown(text)
+    sentences = re.split(r"[.!?]+", clean)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    if not sentences:
+        return 0.0
+
+    # Pattern: be-verb + optional adverb + past participle (-ed, -en, or irregular)
+    passive_pattern = re.compile(
+        r"\b(?:is|are|was|were|been|being|be)\b"
+        r"\s+(?:\w+ly\s+)?"
+        r"(?:\w+ed|written|broken|chosen|driven|eaten|fallen|forgotten|frozen|given|"
+        r"hidden|known|paid|proven|seen|shown|spoken|stolen|taken|told|worn)\b",
+        re.IGNORECASE,
+    )
+
+    passive_count = sum(1 for s in sentences if passive_pattern.search(s))
+    return round(passive_count / len(sentences), 3)
+
+
+# Common transition words/phrases grouped by function
+_TRANSITION_PHRASES = [
+    # Addition
+    "in addition", "furthermore", "moreover", "also", "additionally",
+    # Contrast
+    "however", "on the other hand", "nevertheless", "in contrast",
+    "conversely", "although", "even though", "while", "whereas",
+    # Cause / effect
+    "therefore", "as a result", "consequently", "because of this",
+    "for this reason", "thus", "so",
+    # Example
+    "for example", "for instance", "such as", "specifically",
+    # Sequence
+    "first", "second", "third", "next", "then", "finally",
+    # Summary
+    "overall", "in short", "in summary",
+]
+
+
+def transition_word_score(text: str) -> float:
+    """Percentage of sentences that start with or contain a transition word.
+
+    Good writing typically has 30-40%+ sentences with transitions.
+    Returns a ratio between 0.0 and 1.0.
+    """
+    clean = _strip_markdown(text)
+    sentences = re.split(r"[.!?]+", clean)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    if not sentences:
+        return 0.0
+
+    count = 0
+    for sent in sentences:
+        sent_lower = sent.lower()
+        if any(t in sent_lower for t in _TRANSITION_PHRASES):
+            count += 1
+
+    return round(count / len(sentences), 3)
+
+
+def sentence_length_variety(text: str) -> float:
+    """Coefficient of variation (std / mean) of sentence lengths.
+
+    A higher value indicates more variety: short punchy sentences mixed with
+    longer explanatory ones.  Good writing targets CV >= 0.40.
+    Returns 0.0 if fewer than 2 sentences.
+    """
+    clean = _strip_markdown(text)
+    sentences = re.split(r"[.!?]+", clean)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    if len(sentences) < 2:
+        return 0.0
+
+    lengths = [len(re.findall(r"\b\w+\b", s)) for s in sentences]
+    mean = sum(lengths) / len(lengths)
+    if mean == 0:
+        return 0.0
+    variance = sum((x - mean) ** 2 for x in lengths) / len(lengths)
+    std = math.sqrt(variance)
+    return round(std / mean, 3)
+
+
 def readability_report(text: str) -> dict:
     """Generate a full readability report."""
     fk = flesch_kincaid_score(text)
     avg_sent = avg_sentence_length(text)
     avg_para = avg_paragraph_length(text)
     wc = word_count(text)
+    passive = passive_voice_ratio(text)
+    transitions = transition_word_score(text)
+    variety = sentence_length_variety(text)
 
     issues = []
     if fk < 60:
@@ -132,11 +222,22 @@ def readability_report(text: str) -> dict:
         issues.append(f"Average sentence length {avg_sent} words (target: ≤25)")
     if avg_para > 4:
         issues.append(f"Average paragraph length {avg_para} sentences (target: ≤4)")
+    if passive > 0.15:
+        pct = round(passive * 100)
+        issues.append(f"Passive voice in {pct}% of sentences (target: ≤15%)")
+    if transitions < 0.25:
+        pct = round(transitions * 100)
+        issues.append(f"Transition words in only {pct}% of sentences (target: ≥25%)")
+    if variety < 0.40:
+        issues.append(f"Low sentence length variety (CV={variety}, target: ≥0.40) — mix short and long sentences")
 
     return {
         "flesch_kincaid": fk,
         "avg_sentence_length": avg_sent,
         "avg_paragraph_length": avg_para,
+        "passive_voice_ratio": passive,
+        "transition_word_score": transitions,
+        "sentence_length_variety": variety,
         "word_count": wc,
         "issues": issues,
         "passes": fk >= 60 and avg_sent <= 25,
