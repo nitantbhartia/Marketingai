@@ -263,15 +263,25 @@ class QuillAgent(BaseAgent):
 
         Processes up to ``max_articles_per_run`` articles per invocation so a
         single scheduled run can produce multiple pieces of content.
+
+        Slot allocation: revisions get at most (max_per_run - 1) slots so
+        at least 1 slot is always reserved for new TODO articles.  This
+        prevents revision loops from starving the pipeline of fresh content.
         """
         max_per_run = getattr(self.config.pipeline, "max_articles_per_run", 3)
+        max_revisions = max(1, max_per_run - 1)  # reserve 1 slot for new work
         results: list[dict[str, Any]] = []
+        revision_count = 0
 
         for _ in range(max_per_run):
-            result = self._write_one()
+            # Alternate: revisions first, but cap them
+            prefer_revision = revision_count < max_revisions
+            result = self._write_one(prefer_revision=prefer_revision)
             if result["status"] == "idle":
                 break  # nothing left to write
             results.append(result)
+            if result.get("is_revision"):
+                revision_count += 1
             if result["status"] in ("error", "rate_limited"):
                 break  # stop on error or rate limit to avoid burning quota
 
@@ -291,26 +301,42 @@ class QuillAgent(BaseAgent):
     # ------------------------------------------------------------------
     # Single-article pipeline (called in a loop by run())
     # ------------------------------------------------------------------
-    def _write_one(self) -> dict[str, Any]:
-        """Write or revise a single article through the 3-phase pipeline."""
-        # Try "revision" first (re-writes take priority)
-        article_id = self._try_revision()
-        is_revision = article_id is not None
+    def _write_one(self, prefer_revision: bool = True) -> dict[str, Any]:
+        """Write or revise a single article through the 3-phase pipeline.
 
-        # Then try fresh "todo" articles
-        if article_id is None:
+        When *prefer_revision* is True, revision articles are tried first.
+        When False, TODO articles are tried first — this ensures fresh
+        content is always produced even when revisions are queued.
+        """
+        article_id = None
+        is_revision = False
+
+        if prefer_revision:
+            # Try revision first, then TODO
+            article_id = self._try_revision()
+            is_revision = article_id is not None
+            if article_id is None:
+                article_id = self.pick_and_claim(
+                    from_status=ArticleStatus.TODO.value,
+                    to_status=ArticleStatus.IN_PROGRESS.value,
+                )
+        else:
+            # Try TODO first, then revision
             article_id = self.pick_and_claim(
                 from_status=ArticleStatus.TODO.value,
                 to_status=ArticleStatus.IN_PROGRESS.value,
             )
+            if article_id is None:
+                article_id = self._try_revision()
+                is_revision = article_id is not None
 
         if article_id is None:
-            return {"status": "idle", "reason": "no_articles"}
+            return {"status": "idle", "reason": "no_articles", "is_revision": False}
 
         article = self.db.get_article(article_id)
         if article is None:
             self.db.update_article(article_id, writer_claim="")
-            return {"status": "error", "reason": "article_not_found"}
+            return {"status": "error", "reason": "article_not_found", "is_revision": is_revision}
 
         logger.info(f"Writing article: {article.target_keyword} (revision={is_revision})")
 
@@ -322,7 +348,7 @@ class QuillAgent(BaseAgent):
             self.db.record_metric("rate_limit", 0, json.dumps({
                 "agent": "quill", "article_id": article_id, "phase": "pre_draft",
             }))
-            return {"status": "rate_limited", "article_id": article_id, "reason": str(e)}
+            return {"status": "rate_limited", "article_id": article_id, "reason": str(e), "is_revision": is_revision}
         except Exception as e:
             logger.error(f"Unexpected error writing article {article_id}: {e}", exc_info=True)
             rollback_status = (
