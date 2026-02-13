@@ -329,14 +329,17 @@ class BaseAgent(ABC):
                     continue
                 raise
 
-        # Exhausted retries — raise RateLimitError so callers can
-        # distinguish this from a real failure
-        self.logger.error(
-            f"Anthropic rate limit exhausted after {max_retries} attempts"
-        )
-        raise RateLimitError(
-            f"Anthropic API rate limited after {max_retries} retries: {last_error}"
-        )
+        # Exhausted retries — only raise RateLimitError if the actual
+        # error was a rate limit; server errors (500/503/529) should
+        # propagate as-is so callers don't confuse them with rate limits.
+        if isinstance(last_error, anthropic.RateLimitError):
+            self.logger.error(
+                f"Anthropic rate limit exhausted after {max_retries} attempts"
+            )
+            raise RateLimitError(
+                f"Anthropic API rate limited after {max_retries} retries: {last_error}"
+            ) from last_error
+        raise last_error  # type: ignore[misc]
 
     def _call_gemini(
         self, prompt: str, system: str, model: str | None, max_tokens: int,
