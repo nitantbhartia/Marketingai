@@ -1,0 +1,483 @@
+/* ================================================================
+   ClaimCoach Interactive Conversion Tools — Styles
+   Designed to blend into blog articles (mini) and work standalone (full).
+   ================================================================ */
+
+/* ── Base ── */
+.cc-tool {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.6;
+  color: #1e293b;
+  box-sizing: border-box;
+}
+.cc-tool *, .cc-tool *::before, .cc-tool *::after {
+  box-sizing: inherit;
+}
+
+/* ── Mini mode (article embed) ── */
+.cc-tool-mini {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #2563eb;
+  border-radius: 8px;
+  padding: 20px 24px;
+  margin: 28px 0;
+  max-width: 560px;
+}
+
+/* ── Full mode (standalone page) ── */
+.cc-tool-full {
+  background: #fff;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px;
+}
+
+/* ── Typography ── */
+.cc-tool-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  color: #0f172a;
+}
+.cc-tool-page-title {
+  font-size: 28px;
+  font-weight: 800;
+  margin: 0 0 8px;
+  color: #0f172a;
+}
+.cc-tool-subtitle {
+  font-size: 16px;
+  color: #64748b;
+  margin: 0 0 24px;
+}
+.cc-tool-desc {
+  font-size: 14px;
+  color: #64748b;
+  margin: 0 0 16px;
+}
+
+/* ── Forms ── */
+.cc-tool-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.cc-tool-form.cc-form-inline {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.cc-form-inline label {
+  font-weight: 600;
+  font-size: 14px;
+}
+.cc-tool-form label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  margin-top: 4px;
+}
+.cc-tool-form input[type="number"],
+.cc-tool-form input[type="text"],
+.cc-tool-form select {
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 15px;
+  background: #fff;
+  color: #1e293b;
+  width: 100%;
+  max-width: 280px;
+  transition: border-color 0.15s;
+}
+.cc-tool-form input:focus,
+.cc-tool-form select:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+.cc-radio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+.cc-radio-row input[type="radio"] {
+  margin: 0;
+}
+.cc-radio-row label {
+  font-size: 14px;
+  font-weight: 400;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* ── Buttons ── */
+.cc-tool-btn {
+  display: inline-block;
+  padding: 10px 24px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-top: 8px;
+}
+.cc-tool-btn:hover {
+  background: #1d4ed8;
+}
+
+/* ── Results ── */
+.cc-tool-result {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 16px 0;
+}
+.cc-full-result {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  padding: 24px;
+}
+.cc-full-result h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 16px;
+  color: #0f172a;
+}
+.cc-full-result h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 20px 0 12px;
+  color: #334155;
+}
+.cc-result-label {
+  font-size: 14px;
+  color: #475569;
+  margin-bottom: 4px;
+}
+.cc-result-amount {
+  font-size: 22px;
+  font-weight: 800;
+  color: #dc2626;
+  margin: 4px 0;
+}
+.cc-result-note {
+  font-size: 13px;
+  color: #64748b;
+  font-style: italic;
+  margin-top: 4px;
+}
+.cc-result-subtext {
+  font-size: 14px;
+  color: #475569;
+  margin-top: 8px;
+}
+.cc-result-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+.cc-result-table td {
+  padding: 8px 0;
+  font-size: 15px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.cc-result-table td:last-child {
+  text-align: right;
+  font-weight: 600;
+}
+.cc-result-total td {
+  font-size: 18px;
+  font-weight: 800;
+  color: #dc2626;
+  border-top: 2px solid #e2e8f0;
+  padding-top: 12px;
+}
+
+/* ── Result grid (checklist) ── */
+.cc-result-grid {
+  display: flex;
+  gap: 24px;
+  margin: 12px 0;
+}
+.cc-rg-item {
+  font-size: 14px;
+  color: #475569;
+}
+.cc-rg-val {
+  display: block;
+  font-size: 32px;
+  font-weight: 800;
+  color: #22c55e;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.cc-rg-warn .cc-rg-val {
+  color: #dc2626;
+}
+
+/* ── Score bars ── */
+.cc-score-bar, .cc-score-bar-big {
+  height: 12px;
+  background: #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+.cc-score-bar-big {
+  height: 20px;
+  border-radius: 10px;
+}
+.cc-score-fill {
+  height: 100%;
+  background: #f59e0b;
+  border-radius: inherit;
+  transition: width 0.6s ease;
+}
+.cc-score-label {
+  font-size: 15px;
+  color: #334155;
+}
+.cc-score-big {
+  text-align: center;
+  margin: 16px 0;
+}
+.cc-score-number {
+  font-size: 48px;
+  font-weight: 900;
+  line-height: 1;
+  margin-top: 8px;
+}
+
+/* ── Callouts ── */
+.cc-callout {
+  padding: 14px 18px;
+  border-radius: 6px;
+  font-size: 14px;
+  margin: 12px 0;
+  line-height: 1.5;
+}
+.cc-callout-warn {
+  background: #fef3c7;
+  border: 1px solid #fbbf24;
+  color: #92400e;
+}
+.cc-callout-info {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #1e40af;
+}
+
+/* ── CTA ── */
+.cc-tool-footer {
+  margin-top: 16px;
+  font-size: 14px;
+  color: #475569;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cc-tool-cta {
+  display: inline-block;
+  font-size: 15px;
+  font-weight: 600;
+  color: #2563eb;
+  text-decoration: none;
+  margin-top: 12px;
+}
+.cc-tool-cta:hover {
+  text-decoration: underline;
+}
+.cc-cta-box {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 20px;
+  text-align: center;
+}
+.cc-cta-box p {
+  font-size: 15px;
+  color: #334155;
+  margin: 0 0 12px;
+}
+.cc-tool-cta-btn {
+  display: inline-block;
+  padding: 12px 32px;
+  background: #16a34a;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.cc-tool-cta-btn:hover {
+  background: #15803d;
+}
+
+/* ── More items list ── */
+.cc-more-items {
+  margin: 16px 0;
+}
+.cc-more-items p {
+  font-size: 14px;
+  color: #475569;
+  margin: 0 0 8px;
+}
+.cc-more-items ul {
+  margin: 0;
+  padding-left: 20px;
+}
+.cc-more-items li {
+  font-size: 14px;
+  color: #334155;
+  margin-bottom: 4px;
+}
+
+/* ── Checklist ── */
+.cc-check-list, .cc-check-list-full {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.cc-check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  cursor: pointer;
+  font-size: 14px;
+}
+.cc-check-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.cc-check-label {
+  flex: 1;
+}
+.cc-check-range {
+  font-size: 13px;
+  color: #64748b;
+  white-space: nowrap;
+}
+.cc-check-result {
+  font-size: 14px;
+}
+
+/* Full checklist */
+.cc-check-row-full {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+}
+.cc-check-row-full input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.cc-check-info {
+  flex: 1;
+}
+.cc-check-info strong {
+  display: block;
+  font-size: 15px;
+  color: #0f172a;
+}
+.cc-check-info p {
+  font-size: 13px;
+  color: #64748b;
+  margin: 2px 0;
+}
+.cc-check-info cite {
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: normal;
+}
+.cc-est {
+  font-size: 13px;
+  font-weight: 600;
+  color: #dc2626;
+}
+.cc-info-icon {
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.cc-check-list-full h3 {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  margin: 20px 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+/* ── Quiz steps ── */
+.cc-quiz-steps {
+  min-height: 200px;
+}
+.cc-quiz-step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.cc-quiz-progress {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #2563eb;
+  margin-bottom: 4px;
+}
+
+/* ── Car worth ── */
+.cc-value-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.cc-ext-link {
+  display: inline-block;
+  padding: 10px 16px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  color: #2563eb;
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.cc-ext-link:hover {
+  background: #e2e8f0;
+}
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .cc-tool-mini { padding: 16px; }
+  .cc-tool-full { padding: 20px; }
+  .cc-tool-page-title { font-size: 22px; }
+  .cc-score-number { font-size: 36px; }
+  .cc-result-amount { font-size: 18px; }
+  .cc-form-inline { flex-direction: column; align-items: stretch; }
+  .cc-tool-form input, .cc-tool-form select { max-width: 100%; }
+  .cc-result-grid { flex-direction: column; gap: 12px; }
+}
