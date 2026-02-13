@@ -16,6 +16,7 @@ from jinja2 import Template
 
 from pipeline.agents.base import BaseAgent
 from pipeline.db import ArticleStatus
+from pipeline.utils.images import ImageResolver
 
 
 class EzraAgent(BaseAgent):
@@ -44,6 +45,18 @@ class EzraAgent(BaseAgent):
         self.blog_dir.mkdir(parents=True, exist_ok=True)
         (self.blog_dir / "posts").mkdir(exist_ok=True)
         (self.blog_dir / "html").mkdir(exist_ok=True)
+
+        # Image resolver — converts image:slug placeholders to real URLs
+        img_cfg = getattr(config, "images", None)
+        if img_cfg and getattr(img_cfg, "enabled", True):
+            self._image_resolver = ImageResolver(
+                unsplash_key=getattr(img_cfg, "unsplash_access_key", ""),
+                image_width=getattr(img_cfg, "width", 1200),
+                image_height=getattr(img_cfg, "height", 630),
+                cache_dir=getattr(img_cfg, "cache_dir", ".image_cache"),
+            )
+        else:
+            self._image_resolver = None
 
     def run(self) -> dict[str, Any]:
         """Find and publish ready articles."""
@@ -138,6 +151,9 @@ class EzraAgent(BaseAgent):
             # Generate slug if not set
             slug = article.slug or self._slugify(article.title)
 
+            # Resolve image placeholders to real URLs before publishing
+            article = self._resolve_images(article)
+
             # Save markdown file
             markdown_path = self._save_markdown(article, slug)
 
@@ -186,6 +202,44 @@ class EzraAgent(BaseAgent):
             # Release claim on error
             self.db.update_article(article_id, publisher_claim="")
             raise
+
+    def _resolve_images(self, article):
+        """Replace image:slug placeholders with real image URLs.
+
+        Runs before publishing so the final markdown/HTML contains real
+        <img> tags.  Falls back gracefully — if resolution fails for any
+        image, the placeholder stays and renders as alt text.
+        """
+        if not self._image_resolver:
+            return article
+
+        content = article.markdown_content or ""
+        keyword = article.target_keyword or ""
+
+        # Count placeholders before resolution
+        placeholder_count = len(re.findall(r"!\[[^\]]*\]\(image:[^)]+\)", content))
+        if placeholder_count == 0:
+            return article
+
+        self.logger.info(
+            f"  Resolving {placeholder_count} image placeholder(s)..."
+        )
+
+        resolved_content = self._image_resolver.resolve_all(content, keyword)
+
+        # Count how many were actually resolved
+        remaining = len(re.findall(r"!\[[^\]]*\]\(image:[^)]+\)", resolved_content))
+        resolved_count = placeholder_count - remaining
+
+        if resolved_count > 0:
+            self.logger.info(
+                f"  Resolved {resolved_count}/{placeholder_count} images"
+            )
+            # Update the article's content (create a copy to avoid mutating the DB object)
+            from dataclasses import replace
+            article = replace(article, markdown_content=resolved_content)
+
+        return article
 
     def _save_markdown(self, article, slug: str) -> Path:
         """Save article as markdown file."""

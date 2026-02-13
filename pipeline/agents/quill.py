@@ -573,12 +573,19 @@ Create an outline with:
    - Specific data/examples/dollar amounts to include
    - Which internal articles to link to (if relevant)
    - Which entities from the entity map to incorporate
+   - **Visual break plan**: what type of visual element fits this section —
+     image placeholder, bullet list, numbered steps, comparison table, or
+     Adjuster Insider callout. Every section must have at least one.
+   - **Image suggestion** (for 2-3 sections): brief description of what image
+     would help the reader (chart, diagram, infographic, map). Format:
+     IMAGE: [description of what the image should show]
 3. **FAQ section** — 3-5 questions with brief answer notes
-4. **CTA section** — how to close with ClaimCoach
+4. **CTA section** — how to close with ClaimCoach (mid-article subtle mention + closing CTA)
 5. **External sources** — 2-3 authoritative sites to reference
 
 Be specific about dollar amounts, timelines, and examples to include.
 Use the entity map terms naturally throughout — these signal expertise to search engines.
+Plan at least 2-3 image placements and ensure every section has a visual break.
 Format as a clean outline with ## headers and bullet points."""
 
         try:
@@ -695,10 +702,17 @@ Format as a clean outline with ## headers and bullet points."""
             section_prompt += (
                 f"Write ONLY this section (heading + 200-350 words). "
                 f"Use ## for the H2 heading. Output Markdown only.\n"
-                f"Include at least one > **Adjuster Insider:** blockquote callout with "
-                f"a tip that insurance companies don't want policyholders to know.\n"
-                f"For every technical fact, add a 'Why this matters to your wallet' sentence."
+                f"REQUIRED for every section:\n"
+                f"- At least one > **Adjuster Insider:** blockquote callout\n"
+                f"- At least one visual break: bullet list, numbered steps, bold key terms, or table\n"
+                f"- For every technical fact, add a 'Why this matters to your wallet' sentence\n"
             )
+            # Alternate sections get image placeholders (target 2-3 total)
+            if i % 2 == 1 and not is_last:
+                section_prompt += (
+                    f"- Include ONE image placeholder: ![Descriptive alt text about "
+                    f"{keyword}](image:relevant-slug). Alt text must be 10+ words.\n"
+                )
 
             section_text = self.call_claude(
                 prompt=section_prompt,
@@ -1026,9 +1040,14 @@ Article:
             content = re.sub(r"  +", " ", content)
             fixes.append(f"removed_{ai_ism_count}_ai_isms")
 
-        # Check 7: FAQPage JSON-LD — convert FAQ H3 questions into structured data
-        # for Google rich snippet eligibility (15-25% CTR boost).
-        if detect_faq_section(content) and "FAQPage" not in content:
+        # Check 7: FAQPage + Article JSON-LD — structured data for rich snippets
+        # and E-E-A-T signals (datePublished, author, publisher).
+        if '"@type"' not in content:
+            json_ld = self._generate_article_json_ld(content, article)
+            if json_ld:
+                content += "\n\n" + json_ld
+                fixes.append("added_article_json_ld")
+        elif detect_faq_section(content) and "FAQPage" not in content:
             faq_json_ld = self._generate_faq_json_ld(content)
             if faq_json_ld:
                 content += "\n\n" + faq_json_ld
@@ -1202,6 +1221,113 @@ Article:
 
             # If no anchor found in text, skip (don't force-insert)
         return content
+
+    @staticmethod
+    def _generate_article_json_ld(content: str, article) -> str:
+        """Generate combined Article + FAQPage JSON-LD for E-E-A-T signals.
+
+        Produces a single script block with:
+        - Article schema (datePublished, author, publisher, headline)
+        - FAQPage schema (if FAQ section exists)
+
+        This provides search engines with structured metadata that boosts
+        credibility and enables rich snippet display.
+        """
+        import json as _json
+        from datetime import date
+
+        title = article.suggested_title or article.title or article.target_keyword.title()
+        keyword = article.target_keyword or ""
+        meta_desc = article.meta_description or ""
+        today = date.today().isoformat()
+
+        schemas: list[dict] = []
+
+        # Article schema — E-E-A-T signals
+        article_schema = {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "headline": title[:110],
+            "description": meta_desc[:160] if meta_desc else f"Guide to {keyword}",
+            "datePublished": today,
+            "dateModified": today,
+            "author": {
+                "@type": "Organization",
+                "name": "ClaimCoach",
+                "url": "https://claimcoach.app",
+            },
+            "publisher": {
+                "@type": "Organization",
+                "name": "ClaimCoach",
+                "url": "https://claimcoach.app",
+                "logo": {
+                    "@type": "ImageObject",
+                    "url": "https://claimcoach.app/logo.png",
+                },
+            },
+        }
+
+        # Add article image if placeholders exist
+        images = re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", content)
+        if images:
+            article_schema["image"] = [
+                f"https://claimcoach.app/images/{url.replace('image:', '')}.webp"
+                for _alt, url in images[:3]
+                if url.startswith("image:")
+            ]
+
+        schemas.append(article_schema)
+
+        # FAQPage schema — extract from FAQ H3s
+        faq_match = re.search(
+            r"^##\s+.*(?:FAQ|Frequently Asked|Common Questions).*$",
+            content, re.MULTILINE | re.IGNORECASE,
+        )
+        if faq_match:
+            faq_text = content[faq_match.end():]
+            next_h2 = re.search(r"^##\s+", faq_text, re.MULTILINE)
+            if next_h2:
+                faq_text = faq_text[:next_h2.start()]
+
+            pairs: list[dict] = []
+            questions = re.split(r"^###\s+", faq_text, flags=re.MULTILINE)
+            for q_block in questions:
+                q_block = q_block.strip()
+                if not q_block:
+                    continue
+                lines = q_block.split("\n", 1)
+                question = lines[0].strip().rstrip("?") + "?"
+                answer = lines[1].strip() if len(lines) > 1 else ""
+                answer = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", answer)
+                answer = re.sub(r"[*_`]", "", answer).strip()
+                if question and answer and len(answer) > 20:
+                    pairs.append({
+                        "@type": "Question",
+                        "name": question,
+                        "acceptedAnswer": {"@type": "Answer", "text": answer},
+                    })
+
+            if len(pairs) >= 2:
+                schemas.append({
+                    "@context": "https://schema.org",
+                    "@type": "FAQPage",
+                    "mainEntity": pairs,
+                })
+
+        if not schemas:
+            return ""
+
+        # Combine into a single script block with @graph if multiple schemas
+        if len(schemas) == 1:
+            json_str = _json.dumps(schemas[0], indent=2)
+        else:
+            graph = {
+                "@context": "https://schema.org",
+                "@graph": schemas,
+            }
+            json_str = _json.dumps(graph, indent=2)
+
+        return f'<script type="application/ld+json">\n{json_str}\n</script>'
 
     @staticmethod
     def _generate_faq_json_ld(content: str) -> str:
@@ -1437,6 +1563,13 @@ Article:
                 "no faq section", "no internal links", "no external links",
                 "word count", "meta description", "flagged phrase",
                 "no mention", "no link",
+                # Media & formatting issues fixable by self-review
+                "no image", "image placeholder", "missing alt text",
+                "no faqpage", "json-ld", "schema",
+                "list items", "bold phrase", "scanability",
+                "blockquote", "callout",
+                # CTA placement issues
+                "no mid-article", "closing section",
             )):
                 targeted.append(issue)
             else:

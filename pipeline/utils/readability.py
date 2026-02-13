@@ -402,33 +402,46 @@ def detect_faq_schema(text: str) -> dict:
         text, re.MULTILINE | re.IGNORECASE,
     ))
     has_json_ld = "FAQPage" in text and '"@type"' in text
+    has_article_schema = '"Article"' in text and '"@type"' in text
     faq_questions = re.findall(r"^###\s+(.+\?)\s*$", text, re.MULTILINE)
 
     issues: list[str] = []
     if has_faq_section and not has_json_ld:
         issues.append("FAQ section present but no FAQPage JSON-LD schema (missing rich snippet opportunity)")
-    if has_json_ld:
-        # Validate structure
+    if has_json_ld or has_article_schema:
+        # Validate structure — handles both standalone and @graph formats
         try:
             import json as _json
-            # Extract JSON-LD block
             match = re.search(
                 r"<script[^>]*type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
                 text, re.DOTALL,
             )
             if match:
                 schema = _json.loads(match.group(1))
-                if schema.get("@type") != "FAQPage":
-                    issues.append("JSON-LD schema @type is not FAQPage")
-                main_entity = schema.get("mainEntity", [])
-                if len(main_entity) < 3:
-                    issues.append(f"FAQPage schema has only {len(main_entity)} questions (target: ≥3)")
+                # Handle @graph format (multiple schemas in one block)
+                schemas = schema.get("@graph", [schema])
+                faq_schema = None
+                article_schema_obj = None
+                for s in schemas:
+                    if s.get("@type") == "FAQPage":
+                        faq_schema = s
+                    elif s.get("@type") == "Article":
+                        article_schema_obj = s
+
+                if has_json_ld and faq_schema:
+                    main_entity = faq_schema.get("mainEntity", [])
+                    if len(main_entity) < 3:
+                        issues.append(f"FAQPage schema has only {len(main_entity)} questions (target: ≥3)")
+                elif has_json_ld and not faq_schema:
+                    issues.append("JSON-LD present but FAQPage schema missing from @graph")
+
         except Exception:
-            issues.append("FAQPage JSON-LD is malformed")
+            issues.append("JSON-LD schema is malformed")
 
     return {
         "has_faq_section": has_faq_section,
         "has_json_ld": has_json_ld,
+        "has_article_schema": has_article_schema,
         "faq_question_count": len(faq_questions),
         "issues": issues,
     }

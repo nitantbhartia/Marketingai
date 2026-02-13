@@ -254,7 +254,7 @@ class SageAgent(BaseAgent):
         total_score += fact_total
         all_issues.extend(all_fact_issues)
 
-        # 5. Internal links valid (8 pts)
+        # 5. Internal links (8 pts: 6 validity + 2 anchor text quality)
         link_score = 0.0
         link_issues = []
         published = self.db.get_published_articles()
@@ -266,20 +266,26 @@ class SageAgent(BaseAgent):
                 if link in published_urls or any(s in link for s in published_slugs):
                     valid += 1
             if len(internal_links) > 0 and valid == len(internal_links):
-                link_score = 8
+                link_score = 6
             elif valid > 0:
-                link_score = 4
+                link_score = 3
                 link_issues.append(f"{len(internal_links) - valid} internal links point to unpublished articles")
             elif len(published) <= 3:
-                link_score = 6
+                link_score = 5
                 link_issues.append("Internal links present but no published articles to validate against (grace period)")
             else:
                 link_issues.append("Internal links don't match published articles")
+
+            # Anchor text quality (2 pts) — check anchor text is descriptive,
+            # not "click here" or raw URLs
+            anchor_score, anchor_issues = self._check_anchor_text_quality(content)
+            link_score += anchor_score
+            link_issues.extend(anchor_issues)
         else:
             if len(published) > 3:
                 link_issues.append("No internal links (published articles available)")
             else:
-                link_score = 6
+                link_score = 5
                 link_issues.append("No internal links (few published articles — grace period)")
         scores["internal_links"] = {"score": link_score, "max": 8, "issues": link_issues}
         total_score += link_score
@@ -683,6 +689,64 @@ Format each issue on its own line starting with "- "."""
         return score, issues
 
     @staticmethod
+    def _check_anchor_text_quality(content: str) -> tuple[float, list[str]]:
+        """Score internal link anchor text quality (2 pts).
+
+        Good anchor text is descriptive and keyword-relevant:
+        - [total loss settlement guide](/blog/total-loss) — GOOD
+        - [click here](/blog/total-loss) — BAD
+        - [https://claimcoach.app/blog/total-loss](/blog/total-loss) — BAD
+
+        Returns (score, issues).
+        """
+        issues: list[str] = []
+        # Find all markdown links
+        links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", content)
+        if not links:
+            return 0.0, []
+
+        # Filter to internal links only
+        internal = [
+            (anchor, url) for anchor, url in links
+            if "claimcoach" in url.lower() or url.startswith("/")
+        ]
+        if not internal:
+            return 1.0, []  # No internal links to check — give partial credit
+
+        bad_anchors = {
+            "click here", "here", "this article", "read more", "learn more",
+            "this link", "this page", "link", "article",
+        }
+
+        bad_count = 0
+        for anchor, _url in internal:
+            anchor_stripped = anchor.strip().lower()
+            # Check for generic anchors
+            if anchor_stripped in bad_anchors:
+                bad_count += 1
+            # Check for URL-as-anchor
+            elif anchor_stripped.startswith("http"):
+                bad_count += 1
+            # Check for very short anchors (1-2 words, under 8 chars)
+            elif len(anchor_stripped) < 8 and len(anchor_stripped.split()) <= 2:
+                bad_count += 1
+
+        if bad_count == 0:
+            return 2.0, []
+        elif bad_count <= len(internal) // 2:
+            issues.append(
+                f"{bad_count}/{len(internal)} internal links have generic anchor text "
+                f"(use descriptive, keyword-rich anchors instead of 'click here')"
+            )
+            return 1.0, issues
+        else:
+            issues.append(
+                f"Most internal links ({bad_count}/{len(internal)}) have generic anchor text — "
+                f"use descriptive anchors like 'total loss settlement guide' instead of 'click here'"
+            )
+            return 0.0, issues
+
+    @staticmethod
     def _check_math(content: str) -> tuple[float, list[str]]:
         """Validate math claims using MathValidator (3 pts).
 
@@ -753,13 +817,20 @@ Format each issue on its own line starting with "- "."""
         else:
             issues.append("Low scanability — add more bullet lists, bold key terms, and visual breaks")
 
-        # ── FAQPage JSON-LD schema (2 pts) ──
+        # ── Structured data / JSON-LD schema (2 pts) ──
+        # 1 pt for Article schema (E-E-A-T: datePublished, author, publisher)
+        # 1 pt for FAQPage schema (rich snippet eligibility)
         faq = read_report.get("faq_schema", {})
+        if faq.get("has_article_schema"):
+            score += 1
+        else:
+            issues.append("No Article JSON-LD schema (missing E-E-A-T signals: datePublished, author)")
+
         if faq.get("has_json_ld"):
             if not faq.get("issues"):
-                score += 2
-            else:
                 score += 1
+            else:
+                score += 0.5
                 issues.extend(faq["issues"])
         elif faq.get("has_faq_section"):
             issues.append("FAQ section exists but no FAQPage JSON-LD schema — missing rich snippet opportunity")
