@@ -136,7 +136,8 @@ def status(ctx):
         ("backlog", "Backlog"),
         ("todo", "To Do"),
         ("in_progress", "In Progress"),
-        ("review", "In Review"),
+        ("editor_review", "Sage Scoring"),
+        ("review", "Your Review"),
         ("revision", "Revision"),
         ("ready_to_publish", "Ready to Publish"),
         ("done", "Published"),
@@ -200,8 +201,9 @@ def show(ctx, article_id):
     click.echo(f"  Category:      {article.content_category}")
     click.echo(f"  Target State:  {article.target_state}")
     click.echo(f"  Word Count:    {article.word_count}")
-    click.echo(f"  SEO Score:     {article.seo_score}")
-    click.echo(f"  Readability:   {article.readability_score}")
+    click.echo(f"  Sage Score:    {article.sage_score}/100" if article.sage_score else "  Sage Score:    Not scored yet")
+    click.echo(f"  SEO Score:     {article.seo_score}/20" if article.seo_score else "  SEO Score:     N/A")
+    click.echo(f"  Readability:   {article.readability_score}" if article.readability_score else "  Readability:   N/A")
     click.echo(f"  Revision #:    {article.revision_count}")
     click.echo(f"  Published URL: {article.published_url}")
     click.echo(f"  Created:       {article.created_at}")

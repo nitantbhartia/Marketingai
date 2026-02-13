@@ -375,7 +375,7 @@ class QuillAgent(BaseAgent):
                 meta_description=meta_description,
                 slug=slug,
                 word_count=wc,
-                status=ArticleStatus.REVIEW.value,
+                status=ArticleStatus.EDITOR_REVIEW.value,
                 writer_claim="",
             )
             if is_revision:
@@ -1347,7 +1347,7 @@ Article:
                 meta_description=meta,
                 slug=slug,
                 word_count=wc,
-                status=ArticleStatus.REVIEW.value,
+                status=ArticleStatus.EDITOR_REVIEW.value,
                 writer_claim="",
                 revision_notes=(
                     f"[Targeted revision in round {article.revision_count + 1} — "

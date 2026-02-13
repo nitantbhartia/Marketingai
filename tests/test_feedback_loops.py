@@ -30,7 +30,7 @@ class TestUpdateArticleFieldValidation:
         self.article = self.db.create_article(
             title="Test Article",
             target_keyword="test keyword",
-            status=ArticleStatus.REVIEW.value,
+            status=ArticleStatus.EDITOR_REVIEW.value,
             markdown_content="Some content",
         )
 

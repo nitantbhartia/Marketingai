@@ -64,11 +64,11 @@ class SageAgent(BaseAgent):
     claim_field = "editor_claim"
 
     def run(self) -> dict[str, Any]:
-        """Review all articles in 'review' status."""
+        """Auto-score articles in 'editor_review' status."""
         # Load performance lessons to calibrate scoring thresholds
         self._calibration = self._load_calibration()
 
-        articles = self.db.query_articles(status=ArticleStatus.REVIEW.value, limit=20)
+        articles = self.db.query_articles(status=ArticleStatus.EDITOR_REVIEW.value, limit=20)
         if not articles:
             logger.info("No articles to review")
             return {"status": "idle", "reviewed": 0}
@@ -78,7 +78,7 @@ class SageAgent(BaseAgent):
             # Claim the article
             claim_id = self.generate_claim_id()
             if not self.db.try_claim(
-                article.id, "editor_claim", claim_id, ArticleStatus.REVIEW.value
+                article.id, "editor_claim", claim_id, ArticleStatus.EDITOR_REVIEW.value
             ):
                 continue
 
@@ -86,9 +86,8 @@ class SageAgent(BaseAgent):
                 result = self._review_article(article)
                 results.append(result)
             except RateLimitError as e:
-                # Rate limit — release the claim but keep status as REVIEW so
-                # Sage picks it up again on the next run. DON'T bounce to
-                # REVISION because the article content hasn't been scored yet.
+                # Rate limit — release the claim but keep status as
+                # EDITOR_REVIEW so Sage picks it up again on the next run.
                 logger.warning(
                     f"Rate limited reviewing article {article.id}: {e}"
                 )
@@ -101,8 +100,6 @@ class SageAgent(BaseAgent):
                     f"Error reviewing article {article.id}: {e}", exc_info=True
                 )
                 # Release the claim and send back to REVISION so Quill can retry.
-                # Without the status update, the article gets stuck in REVIEW
-                # permanently — Quill only picks up TODO/REVISION articles.
                 existing_notes = article.revision_notes or ""
                 separator = "\n\n---\n\n" if existing_notes else ""
                 error_note = f"[SAGE ERROR] Review failed: {e}. Sent back for revision."
@@ -259,7 +256,7 @@ class SageAgent(BaseAgent):
         threshold = self.config.pipeline.approval_score_threshold
         if total_score >= threshold:
             decision = "approved"
-            new_status = ArticleStatus.READY_TO_PUBLISH.value
+            new_status = ArticleStatus.REVIEW.value  # Human review before publish
         elif article.revision_count >= self.config.pipeline.max_revision_rounds:
             decision = "rejected"
             new_status = ArticleStatus.REJECTED.value
@@ -276,6 +273,7 @@ class SageAgent(BaseAgent):
         # Update article
         update_kwargs = {
             "status": new_status,
+            "sage_score": total_score,
             "seo_score": seo_raw,
             "readability_score": read_report["flesch_kincaid"],
             "word_count": wc,

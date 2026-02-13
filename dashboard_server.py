@@ -63,23 +63,24 @@ async def dashboard(request: Request):
         with get_db() as db:
             cursor = db.execute("""
                 SELECT id, title, slug, target_keyword, target_state,
-                       status, seo_score, readability_score,
+                       status, sage_score, seo_score, readability_score,
                        validation_status, validation_notes,
                        word_count, created_at, updated_at,
                        writer_claim, editor_claim
                 FROM articles
-                WHERE status IN ('review', 'ready_to_publish', 'revision', 'rejected',
-                                 'todo', 'in_progress', 'done', 'amplified')
+                WHERE status IN ('editor_review', 'review', 'ready_to_publish', 'revision',
+                                 'rejected', 'todo', 'in_progress', 'done', 'amplified')
                 ORDER BY
                     CASE status
                         WHEN 'in_progress' THEN 1
-                        WHEN 'review' THEN 2
-                        WHEN 'ready_to_publish' THEN 3
-                        WHEN 'revision' THEN 4
-                        WHEN 'todo' THEN 5
-                        WHEN 'rejected' THEN 6
-                        WHEN 'done' THEN 7
-                        WHEN 'amplified' THEN 8
+                        WHEN 'editor_review' THEN 2
+                        WHEN 'review' THEN 3
+                        WHEN 'ready_to_publish' THEN 4
+                        WHEN 'revision' THEN 5
+                        WHEN 'todo' THEN 6
+                        WHEN 'rejected' THEN 7
+                        WHEN 'done' THEN 8
+                        WHEN 'amplified' THEN 9
                     END,
                     updated_at DESC
             """)
@@ -152,7 +153,7 @@ async def review_article(request: Request, article_id: int):
         cursor = db.execute("""
             SELECT id, title, slug, markdown_content, meta_title, meta_description,
                    target_keyword, target_state, status,
-                   seo_score, readability_score, state_accuracy, product_compliance,
+                   sage_score, seo_score, readability_score, state_accuracy, product_compliance,
                    broken_links_count, math_errors_count,
                    validation_status, validation_notes, revision_notes,
                    revision_count, word_count,
@@ -222,7 +223,8 @@ async def review_article(request: Request, article_id: int):
         ("backlog", "Backlog"),
         ("todo", "Queued"),
         ("in_progress", "Writing"),
-        ("review", "Review"),
+        ("editor_review", "Sage Scoring"),
+        ("review", "Your Review"),
         ("ready_to_publish", "Approved"),
         ("done", "Published"),
         ("amplified", "Amplified"),
@@ -786,7 +788,7 @@ async def fix_stuck_articles():
 
 @app.get("/debug/fix-stuck-reviews")
 async def fix_stuck_reviews():
-    """Clear stale editor_claim on articles stuck in review.
+    """Clear stale editor_claim on articles stuck in editor_review.
 
     When Sage crashes mid-review, the editor_claim stays locked and
     prevents future Sage runs from processing the article.  This
@@ -798,7 +800,7 @@ async def fix_stuck_reviews():
         cursor = db.execute("""
             UPDATE articles
             SET editor_claim = ''
-            WHERE status = 'review'
+            WHERE status = 'editor_review'
               AND editor_claim != ''
               AND editor_claim IS NOT NULL
         """)

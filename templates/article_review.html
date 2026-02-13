@@ -52,7 +52,7 @@
                 <div class="lifecycle-tracker">
                     {% for stage_key, stage_label in lifecycle_stages %}
                     {% set is_current = (article.status == stage_key) %}
-                    {% set status_order = {'backlog': 0, 'todo': 1, 'in_progress': 2, 'review': 3, 'ready_to_publish': 4, 'done': 5, 'amplified': 6} %}
+                    {% set status_order = {'backlog': 0, 'todo': 1, 'in_progress': 2, 'editor_review': 3, 'review': 4, 'ready_to_publish': 5, 'done': 6, 'amplified': 7} %}
                     {% set current_order = status_order.get(article.status, -1) %}
                     {% set stage_order = status_order.get(stage_key, -1) %}
                     {% set is_past = (stage_order < current_order) %}
@@ -181,30 +181,35 @@
                 <!-- Right Column - Scores & Actions -->
                 <div class="review-sidebar">
                     <!-- Approval Status -->
-                    {% if article.seo_score %}
+                    {% if article.sage_score %}
                     <div class="sidebar-card">
-                        <h3 class="card-heading">Approval Gate</h3>
+                        <h3 class="card-heading">Sage Score</h3>
                         <div class="approval-gate">
                             <div class="approval-score">
-                                <span class="approval-value {{ 'score-excellent' if article.seo_score >= approval_threshold else 'score-needs-work' }}">
-                                    {{ article.seo_score }}
+                                <span class="approval-value {{ 'score-excellent' if article.sage_score >= approval_threshold else 'score-needs-work' }}">
+                                    {{ article.sage_score }}
                                 </span>
                                 <span class="approval-separator">/</span>
-                                <span class="approval-threshold">{{ approval_threshold }}</span>
+                                <span class="approval-threshold">100</span>
                             </div>
                             <div class="approval-label">
-                                {% if article.seo_score >= approval_threshold %}
-                                Meets threshold &mdash; auto-approved by Sage
+                                {% if article.sage_score >= approval_threshold %}
+                                Passed Sage review (threshold: {{ approval_threshold }})
                                 {% else %}
-                                Below threshold &mdash; needs {{ approval_threshold - article.seo_score }} more points
+                                Below threshold &mdash; needs {{ approval_threshold - article.sage_score }} more points
                                 {% endif %}
                             </div>
                             <div class="score-bar-large" style="margin-top: 0.75rem;">
-                                <div class="score-fill-large score-{{ 'excellent' if article.seo_score >= approval_threshold else 'needs-work' }}"
-                                     style="width: {{ article.seo_score }}%"></div>
+                                <div class="score-fill-large score-{{ 'excellent' if article.sage_score >= approval_threshold else 'needs-work' }}"
+                                     style="width: {{ article.sage_score }}%"></div>
                                 <div class="approval-marker" style="left: {{ approval_threshold }}%;" title="Threshold: {{ approval_threshold }}"></div>
                             </div>
                         </div>
+                    </div>
+                    {% else %}
+                    <div class="sidebar-card">
+                        <h3 class="card-heading">Sage Score</h3>
+                        <div class="approval-label">Not scored yet</div>
                     </div>
                     {% endif %}
 
@@ -215,14 +220,14 @@
                         <div class="score-detail">
                             <div class="score-header">
                                 <span class="score-label">SEO Score</span>
-                                <span class="score-number score-{{ 'excellent' if article.seo_score and article.seo_score >= 80 else 'good' if article.seo_score and article.seo_score >= 60 else 'needs-work' }}">
-                                    {{ article.seo_score or 'N/A' }}/100
+                                <span class="score-number score-{{ 'excellent' if article.seo_score and article.seo_score >= 16 else 'good' if article.seo_score and article.seo_score >= 12 else 'needs-work' }}">
+                                    {{ article.seo_score or 'N/A' }}/20
                                 </span>
                             </div>
                             {% if article.seo_score %}
                             <div class="score-bar-large">
-                                <div class="score-fill-large score-{{ 'excellent' if article.seo_score >= 80 else 'good' if article.seo_score >= 60 else 'needs-work' }}"
-                                     style="width: {{ article.seo_score }}%"></div>
+                                <div class="score-fill-large score-{{ 'excellent' if article.seo_score >= 16 else 'good' if article.seo_score >= 12 else 'needs-work' }}"
+                                     style="width: {{ (article.seo_score / 20 * 100)|int }}%"></div>
                             </div>
                             {% endif %}
                         </div>

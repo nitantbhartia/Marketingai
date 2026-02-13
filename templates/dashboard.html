@@ -55,8 +55,14 @@
                     </div>
                     <div class="lifecycle-arrow">&#x2192;</div>
                     <div class="lifecycle-stage">
+                        <div class="lifecycle-count">{{ status_counts.get('editor_review', 0) }}</div>
+                        <div class="lifecycle-label">Sage</div>
+                        <div class="lifecycle-dot lifecycle-dot-review"></div>
+                    </div>
+                    <div class="lifecycle-arrow">&#x2192;</div>
+                    <div class="lifecycle-stage">
                         <div class="lifecycle-count">{{ status_counts.get('review', 0) }}</div>
-                        <div class="lifecycle-label">Review</div>
+                        <div class="lifecycle-label">Your Review</div>
                         <div class="lifecycle-dot lifecycle-dot-review"></div>
                     </div>
                     <div class="lifecycle-arrow">&#x2192;</div>
@@ -164,7 +170,8 @@
             <div class="filters">
                 <button class="filter-btn active" data-status="all">All</button>
                 <button class="filter-btn" data-status="in_progress">Writing</button>
-                <button class="filter-btn" data-status="review">In Review</button>
+                <button class="filter-btn" data-status="editor_review">Sage Scoring</button>
+                <button class="filter-btn" data-status="review">Your Review</button>
                 <button class="filter-btn" data-status="ready_to_publish">Approved</button>
                 <button class="filter-btn" data-status="revision">Revision</button>
                 <button class="filter-btn" data-status="rejected">Rejected</button>
@@ -210,15 +217,26 @@
                         </div>
                         {% endif %}
 
-                        {% if article.seo_score or article.readability_score %}
+                        {% if article.sage_score or article.seo_score or article.readability_score %}
                         <div class="article-scores">
+                            {% if article.sage_score %}
                             <div class="score-item">
-                                <div class="score-label">SEO Score</div>
+                                <div class="score-label">Sage Score</div>
                                 <div class="score-bar">
-                                    <div class="score-fill score-{{ 'excellent' if article.seo_score and article.seo_score >= 80 else 'good' if article.seo_score and article.seo_score >= 60 else 'needs-work' }}"
-                                         style="width: {{ article.seo_score or 0 }}%"></div>
+                                    <div class="score-fill score-{{ 'excellent' if article.sage_score >= 90 else 'good' if article.sage_score >= 70 else 'needs-work' }}"
+                                         style="width: {{ article.sage_score }}%"></div>
                                 </div>
-                                <div class="score-value">{{ article.seo_score or 'N/A' }}</div>
+                                <div class="score-value">{{ article.sage_score }}/100</div>
+                            </div>
+                            {% endif %}
+
+                            <div class="score-item">
+                                <div class="score-label">SEO</div>
+                                <div class="score-bar">
+                                    <div class="score-fill score-{{ 'excellent' if article.seo_score and article.seo_score >= 16 else 'good' if article.seo_score and article.seo_score >= 12 else 'needs-work' }}"
+                                         style="width: {{ ((article.seo_score or 0) / 20 * 100)|int }}%"></div>
+                                </div>
+                                <div class="score-value">{{ article.seo_score or 'N/A' }}/20</div>
                             </div>
 
                             <div class="score-item">
