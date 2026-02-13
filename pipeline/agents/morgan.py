@@ -109,7 +109,8 @@ class MorganAgent(BaseAgent):
             f"- Backlog: {summary.get('backlog', 0)} topics",
             f"- To Do: {summary.get('todo', 0)} articles",
             f"- In Progress: {summary.get('in_progress', 0)} articles",
-            f"- In Review: {summary.get('review', 0)} articles",
+            f"- Sage Scoring: {summary.get('editor_review', 0)} articles",
+            f"- Your Review: {summary.get('review', 0)} articles",
             f"- In Revision: {summary.get('revision', 0)} articles",
             f"- Ready to Publish: {summary.get('ready_to_publish', 0)} articles",
             f"- Published (Done): {summary.get('done', 0)} articles",
@@ -182,7 +183,7 @@ class MorganAgent(BaseAgent):
             # Determine which agent to spawn based on where things are stuck
             if statuses.get(ArticleStatus.TODO.value, 0) > 2:
                 result["spawn"] = "quill"
-            elif statuses.get(ArticleStatus.REVIEW.value, 0) > 3:
+            elif statuses.get(ArticleStatus.EDITOR_REVIEW.value, 0) > 3:
                 result["spawn"] = "sage"
             elif statuses.get(ArticleStatus.READY_TO_PUBLISH.value, 0) > 2:
                 result["spawn"] = "ezra"

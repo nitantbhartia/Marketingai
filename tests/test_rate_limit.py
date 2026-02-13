@@ -344,7 +344,7 @@ class TestSageRateLimitHandling:
         article = self.db.create_article(
             title="Review Article",
             target_keyword="total loss settlement",
-            status=ArticleStatus.REVIEW.value,
+            status=ArticleStatus.EDITOR_REVIEW.value,
             markdown_content="# Content\n\nSome content about total loss settlement.",
             meta_description="Test meta",
             content_category="problem_aware",
@@ -400,9 +400,9 @@ class TestSageRateLimitHandling:
              patch.object(sage, "_load_calibration", return_value={}):
             sage.run()
 
-        # Article should still be in REVIEW (not bounced to REVISION)
+        # Article should still be in EDITOR_REVIEW (not bounced to REVISION)
         updated = self.db.get_article(article.id)
-        assert updated.status == ArticleStatus.REVIEW.value
+        assert updated.status == ArticleStatus.EDITOR_REVIEW.value
         # Claim should be released so Sage can pick it up next run
         assert updated.editor_claim == ""
 

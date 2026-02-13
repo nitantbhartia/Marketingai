@@ -24,7 +24,8 @@ class ArticleStatus(str, Enum):
     BACKLOG = "backlog"
     TODO = "todo"
     IN_PROGRESS = "in_progress"
-    REVIEW = "review"
+    EDITOR_REVIEW = "editor_review"  # Sage auto-scoring
+    REVIEW = "review"               # Human review
     REVISION = "revision"
     READY_TO_PUBLISH = "ready_to_publish"
     DONE = "done"
