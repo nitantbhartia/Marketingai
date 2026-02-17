@@ -119,6 +119,7 @@ class PipelineSettings:
     max_articles_per_run: int = 3
     daily_article_cap: int = 8
     daily_promote_cap: int = 8
+    products: list[str] = field(default_factory=lambda: ["claimcoach", "medbill"])
     max_revision_rounds: int = 5
     quill_stale_recovery_hours: int = 4
     approval_score_threshold: int = 80

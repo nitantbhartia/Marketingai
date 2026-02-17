@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Content Review Dashboard - ClaimCoach</title>
+    <title>Content Review Dashboard</title>
     <link rel="stylesheet" href="/static/dashboard.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -14,9 +14,10 @@
         <div class="container">
             <div class="header-content">
                 <div class="logo">
-                    <h1>ClaimCoach Review Dashboard</h1>
+                    <h1>MarketingAI Review Dashboard</h1>
                 </div>
                 <div class="header-actions">
+                    <a class="btn btn-secondary" href="/seeds?product={{ product_filter if product_filter != 'all' else 'claimcoach' }}">Seed Library</a>
                     <button class="btn btn-secondary" onclick="refreshDashboard()">
                         <span class="icon">&#x21BB;</span> Refresh
                     </button>
@@ -226,6 +227,12 @@
 
             <!-- Filters -->
             <div class="filters">
+                <a class="filter-btn {{ 'active' if product_filter == 'claimcoach' else '' }}" href="/?product=claimcoach">ClaimCoach</a>
+                <a class="filter-btn {{ 'active' if product_filter == 'medbill' else '' }}" href="/?product=medbill">MedBill</a>
+                <a class="filter-btn {{ 'active' if product_filter == 'all' else '' }}" href="/?product=all">All Products</a>
+            </div>
+
+            <div class="filters">
                 <button class="filter-btn active" data-status="all">All</button>
                 <button class="filter-btn" data-status="in_progress">Writing</button>
                 <button class="filter-btn" data-status="editor_review">Sage Scoring</button>
@@ -254,6 +261,7 @@
                                 {% if article.target_state %}
                                 <span class="state-badge">{{ article.target_state }}</span>
                                 {% endif %}
+                                <span class="state-badge">{{ article.product or 'claimcoach' }}</span>
                                 {% if article.word_count %}
                                 <span class="state-badge">{{ article.word_count }} words</span>
                                 {% endif %}

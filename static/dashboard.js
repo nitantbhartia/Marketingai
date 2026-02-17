@@ -243,6 +243,24 @@ async function retryArticle() {
     }
 }
 
+async function promoteToSeed() {
+    if (!confirm('Promote this article markdown into the seed library?')) {
+        return;
+    }
+    const button = event.target;
+    showLoading(button);
+    try {
+        const result = await apiRequest(
+            `${API_BASE}/api/seed/promote/${articleId}`,
+            'POST'
+        );
+        showToast(`Promoted to seed: ${result.file}`, 'success');
+    } catch (error) {
+        showToast(`Error promoting seed: ${error.message}`, 'error');
+        hideLoading(button);
+    }
+}
+
 // ── Pipeline Control Functions ─────────────────────────────
 
 const PIPELINE_STEPS = ['scout', 'brief-topics', 'promote', 'quill', 'sage'];
@@ -404,8 +422,11 @@ function showFullContent() {
 // ── Dashboard Filters ──────────────────────────────────────
 
 function filterArticles(status) {
+    if (!status) {
+        return;
+    }
     // Update active filter button
-    const filterButtons = document.querySelectorAll('.filter-btn');
+    const filterButtons = document.querySelectorAll('.filter-btn[data-status]');
     filterButtons.forEach(btn => {
         if (btn.dataset.status === status) {
             btn.classList.add('active');
@@ -416,10 +437,14 @@ function filterArticles(status) {
 
     // Reload page with filter
     const url = new URL(window.location);
+    const product = url.searchParams.get('product');
     if (status === 'all') {
         url.searchParams.delete('status');
     } else {
         url.searchParams.set('status', status);
+    }
+    if (product) {
+        url.searchParams.set('product', product);
     }
     window.location.href = url.toString();
 }
@@ -489,7 +514,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startAutoRefresh();
 
     // Initialize filter buttons
-    const filterButtons = document.querySelectorAll('.filter-btn');
+    const filterButtons = document.querySelectorAll('.filter-btn[data-status]');
     filterButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             const status = btn.dataset.status;

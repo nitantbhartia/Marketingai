@@ -65,6 +65,7 @@ templates = Jinja2Templates(directory=str(templates_dir))
 
 # Store recent notifications
 recent_notifications = []
+_SEED_ROOT = Path(__file__).parent / "reference" / "gold_articles"
 
 
 def _load_roi_kpis() -> Dict[str, Any]:
@@ -93,7 +94,11 @@ def _load_roi_kpis() -> Dict[str, Any]:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request, status: Optional[str] = None):
+async def dashboard(
+    request: Request,
+    status: Optional[str] = None,
+    product: Optional[str] = None,
+):
     """Main dashboard showing all articles in review."""
 
     try:
@@ -104,11 +109,15 @@ async def dashboard(request: Request, status: Optional[str] = None):
         status_filter = None
         if status and status in allowed_statuses:
             status_filter = status
+        product_filter = (product or "claimcoach").strip().lower()
+        if product_filter not in ("claimcoach", "medbill", "all"):
+            product_filter = "claimcoach"
 
         # Get articles needing review
         with get_db() as db:
             base_query = """
                 SELECT id, title, slug, target_keyword, target_state,
+                       product,
                        status, sage_score, seo_score, readability_score,
                        validation_status, validation_notes,
                        word_count, revision_count, created_at, updated_at,
@@ -121,6 +130,9 @@ async def dashboard(request: Request, status: Optional[str] = None):
             if status_filter:
                 base_query += " AND status = ?"
                 params = (status_filter,)
+            if product_filter != "all":
+                base_query += " AND COALESCE(product, 'claimcoach') = ?"
+                params = params + (product_filter,)
 
             base_query += """
                 ORDER BY
@@ -145,8 +157,9 @@ async def dashboard(request: Request, status: Optional[str] = None):
             cursor = db.execute("""
                 SELECT status, COUNT(*) as count
                 FROM articles
+                WHERE (? = 'all' OR COALESCE(product, 'claimcoach') = ?)
                 GROUP BY status
-            """)
+            """, (product_filter, product_filter))
             status_counts = {row[0]: row[1] for row in cursor.fetchall()}
 
         # Get approval threshold from pipeline config
@@ -179,6 +192,7 @@ async def dashboard(request: Request, status: Optional[str] = None):
             "articles": articles,
             "status_counts": status_counts,
             "status_filter": status_filter or "all",
+            "product_filter": product_filter,
             "approval_threshold": approval_threshold,
             "max_revision_rounds": max_revision_rounds,
             "rate_limit_count": rate_limit_count,
@@ -212,7 +226,7 @@ async def review_article(request: Request, article_id: int):
 
     with get_db() as db:
         cursor = db.execute("""
-            SELECT id, title, slug, markdown_content, meta_title, meta_description,
+            SELECT id, product, title, slug, markdown_content, meta_title, meta_description,
                    target_keyword, target_state, status,
                    sage_score, seo_score, readability_score, state_accuracy, product_compliance,
                    broken_links_count, math_errors_count,
@@ -489,16 +503,20 @@ async def notify_article_ready(request: Request):
 
 
 @app.get("/api/stats")
-async def get_stats():
+async def get_stats(product: Optional[str] = None):
     """Get dashboard statistics."""
+    product_filter = (product or "all").strip().lower()
+    if product_filter not in ("claimcoach", "medbill", "all"):
+        product_filter = "all"
 
     with get_db() as db:
         # Status counts
         cursor = db.execute("""
             SELECT status, COUNT(*) as count
             FROM articles
+            WHERE (? = 'all' OR COALESCE(product, 'claimcoach') = ?)
             GROUP BY status
-        """)
+        """, (product_filter, product_filter))
         status_counts = {row[0]: row[1] for row in cursor.fetchall()}
 
         # Recent activity
@@ -518,7 +536,8 @@ async def get_stats():
                 COUNT(*) as total_reviewed
             FROM articles
             WHERE validation_status IN ('PASS', 'FAIL', 'pass', 'fail')
-        """)
+              AND (? = 'all' OR COALESCE(product, 'claimcoach') = ?)
+        """, (product_filter, product_filter))
         row = cursor.fetchone()
         scores = {
             "avg_seo": round(row[0], 1) if row[0] else 0,
@@ -533,6 +552,86 @@ async def get_stats():
         "roi_kpis": _load_roi_kpis(),
         "notifications_count": len(recent_notifications)
     }
+
+
+def _safe_seed_path(product: str, filename: str) -> Path:
+    p = (product or "").strip().lower()
+    if p not in ("claimcoach", "medbill"):
+        raise HTTPException(status_code=400, detail="Invalid product")
+    base = (_SEED_ROOT / p).resolve()
+    path = (base / filename).resolve()
+    if not str(path).startswith(str(base)):
+        raise HTTPException(status_code=400, detail="Invalid seed path")
+    if path.suffix.lower() != ".md":
+        raise HTTPException(status_code=400, detail="Seed files must be .md")
+    return path
+
+
+@app.get("/seeds", response_class=HTMLResponse)
+async def seeds_page(request: Request, product: Optional[str] = None):
+    product_filter = (product or "claimcoach").strip().lower()
+    if product_filter not in ("claimcoach", "medbill"):
+        product_filter = "claimcoach"
+    directory = _SEED_ROOT / product_filter
+    seeds = []
+    if directory.exists():
+        for p in sorted(directory.glob("*.md")):
+            title = p.stem
+            try:
+                with p.open("r", encoding="utf-8") as f:
+                    first = f.readline().strip()
+                if first.startswith("# "):
+                    title = first[2:].strip()
+            except Exception:
+                pass
+            seeds.append({"file": p.name, "title": title})
+    return templates.TemplateResponse(
+        "seeds.html",
+        {"request": request, "product_filter": product_filter, "seeds": seeds},
+    )
+
+
+@app.get("/api/seed/{product}/{filename:path}")
+async def get_seed(product: str, filename: str):
+    path = _safe_seed_path(product, filename)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Seed not found")
+    return {"product": product, "file": filename, "content": path.read_text(encoding="utf-8")}
+
+
+@app.post("/api/seed/{product}/{filename:path}")
+async def save_seed(product: str, filename: str, request: Request):
+    payload = await request.json()
+    content = str(payload.get("content", ""))
+    path = _safe_seed_path(product, filename)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return {"success": True, "file": filename}
+
+
+@app.post("/api/seed/promote/{article_id}")
+async def promote_article_to_seed(article_id: int):
+    with get_db() as db:
+        row = db.execute(
+            "SELECT title, markdown_content, product FROM articles WHERE id = ?",
+            (article_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Article not found")
+    title = (row["title"] or f"article-{article_id}").strip()
+    content = (row["markdown_content"] or "").strip()
+    product = (row["product"] or "claimcoach").strip().lower()
+    if product not in ("claimcoach", "medbill"):
+        product = "claimcoach"
+    slug = (
+        title.lower()
+        .replace(" ", "-")
+        .replace("/", "-")
+    )
+    slug = "".join(ch for ch in slug if ch.isalnum() or ch in "-_")[:80] or f"article-{article_id}"
+    path = _safe_seed_path(product, f"{slug}.md")
+    path.write_text(content, encoding="utf-8")
+    return {"success": True, "product": product, "file": path.name}
 
 
 @app.get("/health")

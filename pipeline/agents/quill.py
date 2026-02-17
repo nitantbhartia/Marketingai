@@ -13,6 +13,7 @@ import logging
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from pipeline.agents.base import BaseAgent, RateLimitError
@@ -875,17 +876,45 @@ SOURCES: source1, source2, source3"""
             return ""
         return "\n".join(f"- {h}" for h in headings)
 
+    def _product_info(self, article=None) -> dict[str, str]:
+        product = (getattr(article, "product", "") or "claimcoach").strip().lower()
+        if product == "medbill":
+            return {
+                "product": "medbill",
+                "brand": "BillScan",
+                "domain": "billscan.app",
+                "site_url": "https://billscan.app",
+                "tools_url": "https://billscan.app/tools",
+            }
+        return {
+            "product": "claimcoach",
+            "brand": "ClaimCoach",
+            "domain": "claimcoach.app",
+            "site_url": "https://claimcoach.app",
+            "tools_url": "https://claimcoach.app/tools",
+        }
+
+    def _apply_branding(self, text: str, article=None) -> str:
+        info = self._product_info(article)
+        branded = text
+        branded = branded.replace("ClaimCoach", info["brand"])
+        branded = branded.replace("claimcoach.app/tools", info["domain"] + "/tools")
+        branded = branded.replace("claimcoach.app", info["domain"])
+        branded = branded.replace("https://claimcoach.app", info["site_url"])
+        return branded
+
     def _build_exemplar_context(self, article, published_articles: list) -> str:
         """Provide high-pass article patterns as prompt seeds (structure only)."""
-        if not published_articles:
-            return ""
-
         target_category = (article.content_category or "").strip().lower()
         target_state = (article.target_state or "").strip().lower()
+        target_product = (getattr(article, "product", "") or "claimcoach").strip().lower()
         threshold = float(getattr(self.config.pipeline, "approval_score_threshold", 75))
 
         ranked: list[tuple[float, Any]] = []
         for candidate in published_articles:
+            cand_product = (getattr(candidate, "product", "") or "claimcoach").strip().lower()
+            if cand_product != target_product:
+                continue
             if not candidate.markdown_content:
                 continue
             if (candidate.word_count or 0) < 900:
@@ -932,7 +961,7 @@ SOURCES: source1, source2, source3"""
                 continue
             cta_line = ""
             for line in sample.markdown_content.splitlines():
-                if "claimcoach.app" in line.lower():
+                if self._product_info(article)["domain"] in line.lower():
                     cta_line = re.sub(r"\s+", " ", line).strip()
                     break
 
@@ -944,6 +973,20 @@ SOURCES: source1, source2, source3"""
             lines.append(outline)
             if cta_line:
                 lines.append(f"CTA style: {cta_line[:220]}")
+
+        seed_root = Path("reference") / "gold_articles" / target_product
+        if seed_root.exists():
+            for idx, seed_path in enumerate(sorted(seed_root.glob("*.md"))[:10], start=1):
+                try:
+                    seed_text = seed_path.read_text(encoding="utf-8")
+                except Exception:
+                    continue
+                outline = self._extract_outline_from_markdown(seed_text)
+                if not outline:
+                    continue
+                lines.append(f"Seed Exemplar {idx}: file='{seed_path.name}'")
+                lines.append("H2 flow:")
+                lines.append(outline)
 
         return "\n".join(lines) if len(lines) > 1 else ""
 
@@ -1049,6 +1092,7 @@ Use the entity map terms naturally throughout — these signal expertise to sear
 Plan at least 2-3 image placements and ensure every section has a visual break.
 Every SERP content gap and FAQ theme provided above is NON-NEGOTIABLE coverage.
 Format as a clean outline with ## headers and bullet points."""
+        prompt = self._apply_branding(prompt, article=article)
 
         try:
             outline = self.call_claude(
@@ -1097,14 +1141,14 @@ Format as a clean outline with ## headers and bullet points."""
             )
             return self.call_claude(
                 prompt=prompt,
-                system=self._build_system_prompt(article.content_category),
+                system=self._build_system_prompt(article.content_category, article=article),
                 model=self.fast_model,
                 max_tokens=8192,
                 temperature=self._draft_temperature(is_revision),
             )
 
         # ── Section-by-section drafting ──
-        system = self._build_system_prompt(article.content_category)
+        system = self._build_system_prompt(article.content_category, article=article)
         context_block = (
             f"=== PRODUCT CONTEXT ===\n{product_context[:2000]}\n\n"
             f"=== FULL ARTICLE OUTLINE ===\n{outline}\n\n"
@@ -1189,6 +1233,7 @@ Format as a clean outline with ## headers and bullet points."""
                     f"- Include ONE image placeholder: ![Descriptive alt text about "
                     f"{keyword}](image:relevant-slug). Alt text must be 10+ words.\n"
                 )
+            section_prompt = self._apply_branding(section_prompt, article=article)
 
             section_text = self.call_claude(
                 prompt=section_prompt,
@@ -1232,13 +1277,13 @@ Format as a clean outline with ## headers and bullet points."""
         return sections
 
     # ------------------------------------------------------------------
-    def _build_system_prompt(self, content_category: str) -> str:
+    def _build_system_prompt(self, content_category: str, article=None) -> str:
         """Build category-aware system prompt."""
         base = SYSTEM_PROMPT
         guidance = CATEGORY_GUIDANCE.get(content_category or "", "")
         if guidance:
             base += "\n" + guidance
-        return base
+        return self._apply_branding(base, article=article)
 
     def _build_prompt(
         self,
@@ -1308,14 +1353,15 @@ Format as a clean outline with ## headers and bullet points."""
                     f"Suggested title (you can adjust): {article.suggested_title}"
                 )
 
+        info = self._product_info(article)
         parts.append(
-            "\nRemember: End the article with a clear CTA pointing to ClaimCoach "
-            "(claimcoach.app). After the article, output:\n"
+            f"\nRemember: End the article with a clear CTA pointing to {info['brand']} "
+            f"({info['domain']}). After the article, output:\n"
             "META_DESCRIPTION: <150-160 character meta description>\n"
             "Also: cite every legal/numeric/timeline claim with inline sources."
         )
 
-        return "\n\n".join(parts)
+        return self._apply_branding("\n\n".join(parts), article=article)
 
     # ------------------------------------------------------------------
     # Phase 2.5: Contrastive Critique Loop (anti-AI-laziness)
@@ -1391,7 +1437,7 @@ Article:
 
             refined = self.call_claude(
                 prompt=refine_prompt,
-                system=self._build_system_prompt(article.content_category),
+                system=self._build_system_prompt(article.content_category, article=article),
                 model=self.fast_model,
                 max_tokens=8192,
             )
@@ -1462,10 +1508,11 @@ Article:
 
         # Check 2: CTA placement — 3 CTAs (1 early, 1 contextual, 1 closing)
         content_lower = content.lower()
-        cta_count = len(re.findall(r"claimcoach\.app", content_lower))
+        domain_pat = re.escape(self._product_info(article)["domain"])
+        cta_count = len(re.findall(domain_pat, content_lower))
 
         if cta_count < 3:
-            content, cta_fixes = self._ensure_three_ctas(content, keyword)
+            content, cta_fixes = self._ensure_three_ctas(content, keyword, article)
             fixes.extend(cta_fixes)
 
         # Check 3: FAQ section present
@@ -1474,7 +1521,7 @@ Article:
             if faq_block:
                 # Insert before the last section (which should be the CTA)
                 cta_marker = re.search(
-                    r"\n##\s.*(?:Next Step|Get Started|Take Action|ClaimCoach)",
+                    r"\n##\s.*(?:Next Step|Get Started|Take Action)",
                     content, re.IGNORECASE,
                 )
                 if cta_marker:
@@ -1611,7 +1658,7 @@ Article:
                 placeholder = (
                     f"\n\n<!-- TOOL:{tool_id}:mini{state_attr} -->\n"
                     f"\nTry the **{tool_name}** and browse more calculators here: "
-                    f"[ClaimCoach Tools]({tools_url}).\n"
+                    f"[{self._product_info(article)['brand']} Tools]({tools_url}).\n"
                 )
                 # Insert after the second H2 (roughly after problem section)
                 h2_matches = list(re.finditer(r"\n##\s", content))
@@ -1693,8 +1740,7 @@ Article:
             return content, []
         return content, [f"injected_{inserted}_claim_citations"]
 
-    @staticmethod
-    def _ensure_three_ctas(content: str, keyword: str) -> tuple[str, list[str]]:
+    def _ensure_three_ctas(self, content: str, keyword: str, article) -> tuple[str, list[str]]:
         """Ensure the article has 3 strategically placed CTAs.
 
         Strategy:
@@ -1708,8 +1754,9 @@ Article:
         content_lower = content.lower()
 
         # Count existing CTA links
+        info = self._product_info(article)
         cta_positions = [
-            m.start() for m in re.finditer(r"claimcoach\.app", content_lower)
+            m.start() for m in re.finditer(re.escape(info["domain"]), content_lower)
         ]
 
         # Split content into words for position tracking
@@ -1717,25 +1764,27 @@ Article:
         # CTA copy variants (varied, not repetitive)
         cta_variants = [
             (
-                "\n\n> See what's missing from your offer in 5 minutes — "
-                "[check your settlement free](https://claimcoach.app).\n"
+                "\n\n> See what's missing in 5 minutes — "
+                f"[check it free]({info['site_url']}).\n"
             ),
             (
-                "\n\n[ClaimCoach checks all of these line items automatically]"
-                "(https://claimcoach.app) — upload your offer and see what "
+                f"\n\n[{info['brand']} checks these line items automatically]"
+                f"({info['site_url']}) — upload your offer and see what "
                 "they left out.\n"
             ),
             (
-                "\n\nGet your state-specific settlement analysis at "
-                "[ClaimCoach](https://claimcoach.app) — it takes 5 minutes.\n"
+                f"\n\nGet your analysis at "
+                f"[{info['brand']}]({info['site_url']}) — it takes 5 minutes.\n"
             ),
-            ("\n\nDon't leave money on the table. "
-             "[ClaimCoach](https://claimcoach.app) analyzes your settlement "
-             "and shows you exactly where the insurer shortchanged you.\n"),
+            (
+                f"\n\nDon't leave money on the table. "
+                f"[{info['brand']}]({info['site_url']}) analyzes your case "
+                "and shows where value may be missing.\n"
+            ),
         ]
 
-        # If no ClaimCoach mention at all, treat all zones as missing
-        if "claimcoach" not in content_lower:
+        # If no brand mention at all, treat all zones as missing
+        if info["brand"].lower() not in content_lower:
             cta_positions = []
 
         # Check which zones already have CTAs
@@ -1817,9 +1866,8 @@ Article:
 
         return content, fixes
 
-    @staticmethod
     def _inject_internal_links(
-        content: str, published: list, existing_count: int = 0,
+        self, content: str, published: list, target_article, existing_count: int = 0,
     ) -> str:
         """Deterministically inject internal links to published articles.
 
@@ -1834,7 +1882,11 @@ Article:
         for article in published[:15]:
             if injected >= target_count:
                 break
-            url = article.published_url or f"https://claimcoach.app/blog/{article.slug}"
+            if article.published_url:
+                url = article.published_url
+            else:
+                info = self._product_info(article)
+                url = f"{info['site_url'].rstrip('/')}/blog/{article.slug}"
             if not url or url in content:
                 continue
 
@@ -1862,13 +1914,17 @@ Article:
         if injected == 0 and target_count > 0:
             related = []
             for article in published[:3]:
-                url = article.published_url or f"https://claimcoach.app/blog/{article.slug}"
+                if article.published_url:
+                    url = article.published_url
+                else:
+                    info = self._product_info(article)
+                    url = f"{info['site_url'].rstrip('/')}/blog/{article.slug}"
                 if url:
                     related.append(f"- [{article.title}]({url})")
             if related:
                 # Insert before the last ## section (CTA)
                 cta_match = re.search(
-                    r"\n##\s.*(?:Next Step|Get Started|Take Action|ClaimCoach)",
+                    r"\n##\s.*(?:Next Step|Get Started|Take Action)",
                     content, re.IGNORECASE,
                 )
                 block = "\n\n## Related Reading\n\n" + "\n".join(related) + "\n"
@@ -1948,8 +2004,7 @@ Article:
             # If no anchor found in text, skip (don't force-insert)
         return content
 
-    @staticmethod
-    def _generate_article_json_ld(content: str, article) -> str:
+    def _generate_article_json_ld(self, content: str, article) -> str:
         """Generate combined Article + FAQPage JSON-LD for E-E-A-T signals.
 
         Produces a single script block with:
@@ -1966,6 +2021,7 @@ Article:
         keyword = article.target_keyword or ""
         meta_desc = article.meta_description or ""
         today = date.today().isoformat()
+        info = self._product_info(article)
 
         schemas: list[dict] = []
 
@@ -1979,16 +2035,16 @@ Article:
             "dateModified": today,
             "author": {
                 "@type": "Organization",
-                "name": "ClaimCoach",
-                "url": "https://claimcoach.app",
+                "name": info["brand"],
+                "url": info["site_url"],
             },
             "publisher": {
                 "@type": "Organization",
-                "name": "ClaimCoach",
-                "url": "https://claimcoach.app",
+                "name": info["brand"],
+                "url": info["site_url"],
                 "logo": {
                     "@type": "ImageObject",
-                    "url": "https://claimcoach.app/logo.png",
+                    "url": info["site_url"].rstrip("/") + "/logo.png",
                 },
             },
         }
@@ -1997,7 +2053,7 @@ Article:
         images = re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", content)
         if images:
             article_schema["image"] = [
-                f"https://claimcoach.app/images/{url.replace('image:', '')}.webp"
+                f"{info['site_url'].rstrip('/')}/images/{url.replace('image:', '')}.webp"
                 for _alt, url in images[:3]
                 if url.startswith("image:")
             ]
@@ -2232,11 +2288,12 @@ Article:
     def _generate_meta(self, article) -> str:
         """Generate a meta description using Flash-Lite (utility tier)."""
         keyword = article.target_keyword or ""
+        info = self._product_info(article)
         try:
             result = self.call_claude(
                 prompt=(
                     f'Write a meta description (150-160 chars) for an article about '
-                    f'"{keyword}" for ClaimCoach. Include the keyword, an emotional '
+                    f'"{keyword}" for {info["brand"]}. Include the keyword, an emotional '
                     f'hook, and a reason to click. Return ONLY the meta description.'
                 ),
                 model=self.utility_model,
@@ -2434,7 +2491,7 @@ Article:
                 )
                 result = self.call_claude(
                     prompt=edit_prompt,
-                    system=self._build_system_prompt(article.content_category),
+                    system=self._build_system_prompt(article.content_category, article=article),
                     model=(
                         self.strategy_model
                         if self._is_high_trust_article(article, is_revision=True)
@@ -2665,7 +2722,7 @@ Article:
                 fixes.append("routine_seo_keyword_opening")
 
         if codes & {"CTA_MISSING", "CTA_LINK_MISSING", "CTA_EARLY_MISSING", "CTA_COUNT_LOW"}:
-            updated, cta_fixes = self._ensure_three_ctas(content, keyword)
+            updated, cta_fixes = self._ensure_three_ctas(content, keyword, article)
             if updated != content:
                 content = updated
             if cta_fixes:
@@ -2692,7 +2749,10 @@ Article:
             internal_links, _ = extract_links(content)
             if len(internal_links) < 3:
                 injected = self._inject_internal_links(
-                    content, published_articles, existing_count=len(internal_links),
+                    content,
+                    published_articles,
+                    article,
+                    existing_count=len(internal_links),
                 )
                 if injected != content:
                     content = injected
@@ -2821,7 +2881,11 @@ Article:
             return ""
         lines = ["Available articles for internal linking:"]
         for a in published[:20]:
-            url = a.published_url or f"https://claimcoach.app/blog/{a.slug}"
+            if a.published_url:
+                url = a.published_url
+            else:
+                info = self._product_info(a)
+                url = f"{info['site_url'].rstrip('/')}/blog/{a.slug}"
             lines.append(f"- [{a.title}]({url}) — keyword: {a.target_keyword}")
         return "\n".join(lines)
 

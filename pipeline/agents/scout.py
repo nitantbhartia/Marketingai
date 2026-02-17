@@ -72,8 +72,14 @@ class ScoutAgent(BaseAgent):
             if cluster and primary and cluster not in cluster_primary:
                 cluster_primary[cluster] = primary
 
+        products = list(getattr(self.config.pipeline, "products", ["claimcoach"]))
+        if not products:
+            products = ["claimcoach"]
+
         # Phase 1: Seed topics (always available, no API needed)
-        topics = get_all_seed_topics()
+        topics = []
+        for product in products:
+            topics.extend(get_all_seed_topics(product=product))
         new_count = 0
         skipped_duplicates = 0
         skipped_cannibal = 0
@@ -102,6 +108,7 @@ class ScoutAgent(BaseAgent):
             brief = self._generate_brief(topic, cluster, primary_url)
 
             self.db.create_article(
+                product=topic.get("product", "claimcoach"),
                 title=topic.get("suggested_title", ""),
                 status=ArticleStatus.BACKLOG.value,
                 target_keyword=kw,
@@ -126,13 +133,23 @@ class ScoutAgent(BaseAgent):
             new_count += 1
 
         # Phase 2: Discover related keywords via autocomplete
-        discovery_bases = [
-            "total loss settlement",
-            "insurance lowball offer",
-            "car totaled what to do",
-            "diminished value claim",
-            "dispute insurance claim",
-        ]
+        discovery_bases = []
+        if "claimcoach" in products:
+            discovery_bases.extend([
+                "total loss settlement",
+                "insurance lowball offer",
+                "car totaled what to do",
+                "diminished value claim",
+                "dispute insurance claim",
+            ])
+        if "medbill" in products:
+            discovery_bases.extend([
+                "medical bill negotiation",
+                "surprise medical bill dispute",
+                "hospital bill too high",
+                "itemized bill errors",
+                "out of network lab bill",
+            ])
 
         discovered = 0
         for base in discovery_bases:
@@ -161,7 +178,11 @@ class ScoutAgent(BaseAgent):
                     "Do not cannibalize the primary URL intent."
                 )
 
+                inferred_product = "medbill" if any(
+                    t in kw.lower() for t in ("medical bill", "hospital bill", "anesthesia", "lab bill", "no surprises")
+                ) else "claimcoach"
                 self.db.create_article(
+                    product=inferred_product,
                     status=ArticleStatus.BACKLOG.value,
                     target_keyword=kw,
                     search_volume=100,  # Estimated
@@ -189,7 +210,8 @@ class ScoutAgent(BaseAgent):
         # Phase 3: If LLM is available, generate briefs for top unbriefed topics.
         # Capped at 5 per run (each brief = 2 API calls, well within free-tier
         # 5 RPM when spaced by the global rate_limit_delay).
-        unbriefed = self.db.query_articles(status=ArticleStatus.BACKLOG.value, limit=15)
+        unbriefed = self.db.query_articles(status=ArticleStatus.BACKLOG.value, limit=50)
+        unbriefed = [a for a in unbriefed if (a.product or "claimcoach") in products][:15]
         if performance_hints:
             # Prioritize high-pass categories and push known low-pass
             # categories to the back of the briefing queue.
@@ -235,6 +257,7 @@ class ScoutAgent(BaseAgent):
         backlog = self.db.query_articles(
             status=ArticleStatus.BACKLOG.value, limit=50
         )
+        backlog = [a for a in backlog if (a.product or "claimcoach") in products]
         for article in backlog:
             # Only promote articles with a substantive AI-generated brief
             brief = article.content_brief or ""

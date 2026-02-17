@@ -41,6 +41,9 @@
                         <strong>State:</strong> {{ article.target_state or 'N/A' }}
                     </span>
                     <span class="meta-item">
+                        <strong>Product:</strong> {{ article.product or 'claimcoach' }}
+                    </span>
+                    <span class="meta-item">
                         <strong>Word Count:</strong> {{ word_count }}
                     </span>
                     <span class="meta-item">
@@ -361,6 +364,10 @@
                             View Published
                         </a>
                         {% endif %}
+
+                        <button class="btn btn-outline btn-full" onclick="promoteToSeed()">
+                            Promote As Seed
+                        </button>
 
                         <a href="/" class="btn btn-outline btn-full">
                             &larr; Back to Dashboard

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seed Library</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+<header class="header">
+    <div class="container">
+        <div class="header-content">
+            <div class="logo"><h1>Seed Library</h1></div>
+            <div class="header-actions">
+                <a class="btn btn-secondary" href="/?product={{ product_filter }}">Back to Dashboard</a>
+            </div>
+        </div>
+    </div>
+</header>
+<main class="main-content">
+    <div class="container">
+        <div class="filters">
+            <a class="filter-btn {{ 'active' if product_filter == 'claimcoach' else '' }}" href="/seeds?product=claimcoach">ClaimCoach</a>
+            <a class="filter-btn {{ 'active' if product_filter == 'medbill' else '' }}" href="/seeds?product=medbill">MedBill</a>
+        </div>
+
+        <div class="review-grid">
+            <div class="review-main">
+                <div class="review-section">
+                    <h2 class="section-heading">Seed Articles ({{ product_filter }})</h2>
+                    <div class="articles-list">
+                        {% for seed in seeds %}
+                        <div class="article-card" onclick='loadSeed({{ product_filter|tojson }}, {{ seed.file|tojson }})' style="cursor:pointer;">
+                            <div class="article-title">{{ seed.title }}</div>
+                            <div class="article-keyword mono">{{ seed.file }}</div>
+                        </div>
+                        {% endfor %}
+                        {% if not seeds %}
+                        <div class="empty-state">No seed files found.</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="review-sidebar">
+                <div class="sidebar-card">
+                    <h3 class="card-heading">Editor</h3>
+                    <div class="meta-field">
+                        <label>File</label>
+                        <div id="seedFile" class="meta-value mono">Select a seed file</div>
+                    </div>
+                    <textarea id="seedContent" style="width:100%;min-height:520px;font-family:monospace;"></textarea>
+                    <button class="btn btn-success btn-full" style="margin-top:0.6rem;" onclick="saveSeed()">Save Seed</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+<script>
+let currentProduct = "{{ product_filter }}";
+let currentFile = "";
+async function loadSeed(product, file) {
+  currentProduct = product;
+  currentFile = file;
+  const res = await fetch(`/api/seed/${product}/${file}`);
+  const data = await res.json();
+  document.getElementById('seedFile').textContent = file;
+  document.getElementById('seedContent').value = data.content || "";
+}
+async function saveSeed() {
+  if (!currentFile) return alert('Select a seed file first.');
+  const content = document.getElementById('seedContent').value;
+  const res = await fetch(`/api/seed/${currentProduct}/${currentFile}`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({content})
+  });
+  if (!res.ok) return alert('Save failed');
+  alert('Saved');
+}
+</script>
+</body>
+</html>

@@ -62,6 +62,19 @@ SEED_KEYWORDS: list[dict] = [
     {"keyword": "insurance company totaled my car unfairly", "volume": 700, "difficulty": 0.20, "intent": 0.85, "category": "emotional"},
 ]
 
+MEDBILL_SEED_KEYWORDS: list[dict] = [
+    {"keyword": "medical bill negotiation", "volume": 3600, "difficulty": 0.42, "intent": 0.9, "category": "solution_aware"},
+    {"keyword": "how to dispute a medical bill", "volume": 3200, "difficulty": 0.40, "intent": 0.9, "category": "solution_aware"},
+    {"keyword": "itemized medical bill errors", "volume": 1800, "difficulty": 0.31, "intent": 0.85, "category": "problem_aware"},
+    {"keyword": "ER bill too high what to do", "volume": 1400, "difficulty": 0.35, "intent": 0.85, "category": "problem_aware"},
+    {"keyword": "surprise anesthesia bill dispute", "volume": 900, "difficulty": 0.28, "intent": 0.9, "category": "line_item"},
+    {"keyword": "out of network lab bill dispute", "volume": 800, "difficulty": 0.26, "intent": 0.88, "category": "line_item"},
+    {"keyword": "hospital bill payment plan negotiation", "volume": 1100, "difficulty": 0.30, "intent": 0.82, "category": "solution_aware"},
+    {"keyword": "charity care nonprofit hospital", "volume": 1200, "difficulty": 0.34, "intent": 0.78, "category": "line_item"},
+    {"keyword": "No Surprises Act billing rights", "volume": 1500, "difficulty": 0.38, "intent": 0.8, "category": "state_specific"},
+    {"keyword": "Good Faith Estimate dispute process", "volume": 1000, "difficulty": 0.27, "intent": 0.82, "category": "line_item"},
+]
+
 # State-specific templates
 STATE_KEYWORDS_TEMPLATE = [
     "{state} total loss threshold",
@@ -113,6 +126,7 @@ def generate_state_keywords() -> list[dict]:
                 "intent": 0.75,
                 "category": "state_specific",
                 "state": state,
+                "product": "claimcoach",
             })
     return results
 
@@ -129,6 +143,7 @@ def generate_vehicle_keywords() -> list[dict]:
                 "difficulty": 0.15,
                 "intent": 0.8,
                 "category": "vehicle_specific",
+                "product": "claimcoach",
             })
     return results
 
@@ -165,27 +180,41 @@ def score_topic(
     return round(score, 3)
 
 
-def get_all_seed_topics() -> list[dict]:
-    """Get all seed topics with scores."""
+def get_all_seed_topics(product: str = "claimcoach") -> list[dict]:
+    """Get all seed topics with scores for a product."""
     topics = []
+    p = (product or "claimcoach").strip().lower()
 
-    for kw in SEED_KEYWORDS:
-        kw["score"] = score_topic(
-            kw["volume"], kw["difficulty"], kw["intent"], kw.get("category", "")
-        )
-        topics.append(kw)
+    if p == "medbill":
+        for kw in MEDBILL_SEED_KEYWORDS:
+            item = dict(kw)
+            item["product"] = "medbill"
+            item["score"] = score_topic(
+                item["volume"], item["difficulty"], item["intent"], item.get("category", "")
+            )
+            topics.append(item)
+    else:
+        for kw in SEED_KEYWORDS:
+            item = dict(kw)
+            item["product"] = "claimcoach"
+            item["score"] = score_topic(
+                item["volume"], item["difficulty"], item["intent"], item.get("category", "")
+            )
+            topics.append(item)
 
-    for kw in generate_state_keywords():
-        kw["score"] = score_topic(
-            kw["volume"], kw["difficulty"], kw["intent"], kw.get("category", "")
-        )
-        topics.append(kw)
+        for kw in generate_state_keywords():
+            item = dict(kw)
+            item["score"] = score_topic(
+                item["volume"], item["difficulty"], item["intent"], item.get("category", "")
+            )
+            topics.append(item)
 
-    for kw in generate_vehicle_keywords():
-        kw["score"] = score_topic(
-            kw["volume"], kw["difficulty"], kw["intent"], kw.get("category", "")
-        )
-        topics.append(kw)
+        for kw in generate_vehicle_keywords():
+            item = dict(kw)
+            item["score"] = score_topic(
+                item["volume"], item["difficulty"], item["intent"], item.get("category", "")
+            )
+            topics.append(item)
 
     # Sort by score descending
     topics.sort(key=lambda x: x["score"], reverse=True)

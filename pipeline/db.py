@@ -36,6 +36,7 @@ class ArticleStatus(str, Enum):
 @dataclass
 class Article:
     id: int = 0
+    product: str = "claimcoach"
     title: str = ""
     slug: str = ""
     target_keyword: str = ""
@@ -172,6 +173,7 @@ class FeedbackLesson:
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS articles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product TEXT NOT NULL DEFAULT 'claimcoach',
     title TEXT NOT NULL DEFAULT '',
     slug TEXT UNIQUE,
     target_keyword TEXT DEFAULT '',
@@ -289,6 +291,7 @@ CREATE INDEX IF NOT EXISTS idx_lessons_confidence ON feedback_lessons(confidence
 # Pipeline-specific columns that may be missing if the articles table
 # was originally created by content_quality.db.init_database().
 _PIPELINE_COLUMN_MIGRATIONS = {
+    "product": "TEXT DEFAULT 'claimcoach'",
     "content_brief": "TEXT DEFAULT ''",
     "search_volume": "INTEGER DEFAULT 0",
     "keyword_difficulty": "REAL DEFAULT 0.0",

@@ -36,6 +36,7 @@ def init_database():
         db.execute("""
             CREATE TABLE IF NOT EXISTS articles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product TEXT NOT NULL DEFAULT 'claimcoach',
                 title TEXT NOT NULL,
                 slug TEXT UNIQUE,
                 target_keyword TEXT,
@@ -252,6 +253,7 @@ def _run_migrations(db):
 
         # Columns that may be missing in older databases
         migrations = {
+            "product": "TEXT DEFAULT 'claimcoach'",
             "word_count": "INTEGER DEFAULT 0",
             # Pipeline-specific columns (used by Scout/Quill/Sage agents)
             "content_brief": "TEXT DEFAULT ''",
