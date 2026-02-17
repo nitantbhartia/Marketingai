@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -250,9 +251,30 @@ def move(ctx, article_id, new_status):
 def promote(ctx, count):
     """Move top-scored backlog topics to 'todo' status."""
     cfg, db = get_config_and_db(ctx.obj["config_path"])
+    daily_cap = max(1, int(getattr(cfg.pipeline, "daily_promote_cap", 8)))
+    start_of_day = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).isoformat()
+    promoted_today = len(
+        db.get_metrics(name="promote_to_todo", since=start_of_day, limit=5000)
+    )
+    remaining = max(0, daily_cap - promoted_today)
+
+    click.echo(
+        f"Daily promote cap: {daily_cap} | already promoted today: {promoted_today} | remaining: {remaining}"
+    )
+    if remaining <= 0:
+        click.echo("Daily promote cap reached. No topics promoted.")
+        return
+
+    requested = max(0, int(count))
+    effective_count = min(requested, remaining)
+    if effective_count < requested:
+        click.echo(f"Requested {requested}, limiting to {effective_count} due to daily cap.")
+
     backlog = db.query_articles(
         status=ArticleStatus.BACKLOG.value,
-        limit=count,
+        limit=effective_count,
         order_by=(
             "commercial_intent DESC, "
             "search_volume DESC, "
@@ -268,10 +290,13 @@ def promote(ctx, count):
     promoted = 0
     for article in backlog:
         db.update_article(article.id, status=ArticleStatus.TODO.value)
+        db.record_metric("promote_to_todo", 1, article.id)
         click.echo(f"  Promoted: {article.target_keyword}")
         promoted += 1
 
+    remaining_after = max(0, remaining - promoted)
     click.echo(f"\nPromoted {promoted} topics to 'todo'")
+    click.echo(f"Daily remaining promote capacity: {remaining_after}")
 
 
 @cli.command()

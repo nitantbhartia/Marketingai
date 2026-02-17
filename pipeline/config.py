@@ -117,6 +117,7 @@ class PipelineSettings:
     articles_per_week_target: int = 7
     max_articles_per_run: int = 3
     daily_article_cap: int = 8
+    daily_promote_cap: int = 8
     max_revision_rounds: int = 5
     approval_score_threshold: int = 80
     dashboard_url: str = ""
