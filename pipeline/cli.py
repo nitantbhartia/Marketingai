@@ -253,7 +253,12 @@ def promote(ctx, count):
     backlog = db.query_articles(
         status=ArticleStatus.BACKLOG.value,
         limit=count,
-        order_by="commercial_intent DESC, keyword_difficulty ASC",
+        order_by=(
+            "commercial_intent DESC, "
+            "search_volume DESC, "
+            "keyword_difficulty ASC, "
+            "created_at ASC"
+        ),
     )
 
     if not backlog:

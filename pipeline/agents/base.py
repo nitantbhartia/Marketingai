@@ -214,24 +214,41 @@ class BaseAgent(ABC):
         return self.db.try_claim(article_id, self.claim_field, claim_id, new_status)
 
     def pick_and_claim(self, from_status: str, to_status: str) -> int | None:
-        """Pick a random unclaimed article from a status and claim it.
+        """Pick the highest-priority unclaimed article from a status and claim it.
 
         Returns article ID if successful, None otherwise.
         """
         if self.claim_field is None:
             raise ValueError(f"Agent {self.name} has no claim_field defined")
 
+        order_by = "created_at ASC"
+        if from_status == "todo":
+            # Highest ROI first: priority refreshes, high intent, high volume,
+            # then easier keywords.
+            order_by = (
+                "CASE refresh_priority "
+                "WHEN 'HIGH' THEN 0 "
+                "WHEN 'MEDIUM' THEN 1 "
+                "WHEN 'LOW' THEN 2 "
+                "ELSE 3 END, "
+                "commercial_intent DESC, "
+                "search_volume DESC, "
+                "keyword_difficulty ASC, "
+                "created_at ASC"
+            )
+        elif from_status == "revision":
+            # Finish articles already close to done.
+            order_by = "revision_count DESC, updated_at ASC"
+
         articles = self.db.query_articles(
             status=from_status,
             writer_claim_empty=(self.claim_field == "writer_claim"),
             limit=50,
+            order_by=order_by,
         )
         if not articles:
             self.logger.info(f"No articles in '{from_status}' status")
             return None
-
-        # Shuffle to prevent collision when multiple instances run
-        random.shuffle(articles)
 
         for article in articles:
             claim_val = getattr(article, self.claim_field, "")

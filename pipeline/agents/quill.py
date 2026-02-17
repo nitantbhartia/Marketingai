@@ -12,6 +12,7 @@ import json
 import logging
 import re
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any
 
 from pipeline.agents.base import BaseAgent, RateLimitError
@@ -269,6 +270,17 @@ class QuillAgent(BaseAgent):
         prevents revision loops from starving the pipeline of fresh content.
         """
         max_per_run = getattr(self.config.pipeline, "max_articles_per_run", 3)
+        daily_cap = max(1, int(getattr(self.config.pipeline, "daily_article_cap", 8)))
+        written_today = self._count_written_today()
+        if written_today >= daily_cap:
+            logger.info(
+                f"Daily article cap reached: {written_today}/{daily_cap}. "
+                "Skipping Quill run."
+            )
+            return {"status": "idle", "reason": "daily_cap_reached", "written_today": written_today}
+
+        remaining_quota = max(0, daily_cap - written_today)
+        max_per_run = min(max_per_run, remaining_quota)
         max_revisions = max(1, max_per_run - 1)  # reserve 1 slot for new work
         results: list[dict[str, Any]] = []
         revision_count = 0
@@ -297,6 +309,13 @@ class QuillAgent(BaseAgent):
             "articles_written": len([r for r in results if r["status"] == "success"]),
             "results": results,
         }
+
+    def _count_written_today(self) -> int:
+        """Count successful Quill writes since UTC midnight."""
+        now = datetime.now(timezone.utc)
+        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        metrics = self.db.get_metrics(name="quill_write", since=start_of_day, limit=2000)
+        return len(metrics)
 
     # ------------------------------------------------------------------
     # Single-article pipeline (called in a loop by run())
