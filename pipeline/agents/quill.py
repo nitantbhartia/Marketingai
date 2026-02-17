@@ -55,7 +55,7 @@ Your reader just got a lowball offer. They're stressed, maybe angry, probably on
 at 11pm. They want to know "am I getting screwed and what do I do right now." Every extra
 paragraph is a chance for them to bounce. Keep it tight.
 
-**Strict word limit: 1200-1500 words. Never exceed 1500.**
+**Target word count: 1200-1800 words.**
 
 Follow this structure:
 
@@ -78,18 +78,26 @@ Follow this structure:
 
 5. **What to do next** (~200 words): 3-5 concrete action steps. Numbered list.
 
-6. **FAQ** (~250 words, 3-4 questions for schema markup, use ### for each question)
+6. **FAQ** (~250 words, 3-5 questions for schema markup, use ### for each question)
    → **FINAL CTA**: End the last FAQ answer with a natural ClaimCoach link.
 
-**Total: ~1200-1500 words, 4 CTAs. Reader hits the first one before they've scrolled twice.**
+**Total: ~1200-1800 words, 3 CTAs. Reader hits the first one before they've scrolled twice.**
 
 ### CTA Rules
-- 4 CTAs per article (1 early, 2 contextual, 1 closing)
+- Exactly 3 CTAs per article (1 early, 1 contextual, 1 closing)
 - NEVER use salesy banner language. CTAs must feel like helpful suggestions.
 - Always link to https://claimcoach.app — never make up feature-specific URLs
-- Vary the CTA copy. Don't repeat the same line 4 times.
+- Vary the CTA copy. Don't repeat the same line.
 - Good: "Want to see which ones apply to your offer? [ClaimCoach checks this automatically.](https://claimcoach.app)"
 - Bad: "Click here to try ClaimCoach!" (too pushy)
+
+### Interactive Tools
+- If the article includes calculations, valuation, thresholds, taxes, or fairness checks,
+  embed one mini tool placeholder in body:
+  `<!-- TOOL:tool_id:mini -->`
+- Also add one plain link to the tools hub:
+  [Browse all calculators and quizzes](https://claimcoach.app/tools)
+- Do not add tools when content is purely narrative and non-numeric.
 
 ### Callouts
 - Use "Adjuster Insider" Callouts: Use Markdown blockquotes (> ) for tips that a standard
@@ -390,6 +398,7 @@ class QuillAgent(BaseAgent):
         # Load context documents
         product_context = self.config.load_product_context()
         state_rules = self.config.load_state_rules()
+        seo_template = self.config.load_seo_template()
         published = self.db.get_published_articles()
         internal_links_context = self._format_internal_links(published)
         lessons = self._extract_lessons()
@@ -441,6 +450,7 @@ class QuillAgent(BaseAgent):
             serp_context=serp_context,
             nhtsa_context=nhtsa_context,
             model_name=outline_model,
+            seo_template=seo_template,
         )
 
         # ── Phase 2: Write article (section-by-section from outline) ──
@@ -448,6 +458,7 @@ class QuillAgent(BaseAgent):
             result_text = self._draft_from_outline(
                 article, outline, product_context, state_rules,
                 internal_links_context, is_revision, lessons,
+                seo_template=seo_template,
             )
         except RateLimitError as e:
             logger.warning(f"Rate limited during draft of article {article_id}: {e}")
@@ -739,6 +750,7 @@ SOURCES: source1, source2, source3"""
         serp_context: str = "",
         nhtsa_context: str = "",
         model_name: str | None = None,
+        seo_template: str = "",
     ) -> str:
         """Generate a structured outline before writing.
 
@@ -776,6 +788,13 @@ SOURCES: source1, source2, source3"""
         if nhtsa_context:
             nhtsa_section = f"\n{nhtsa_context}\n"
 
+        template_section = ""
+        if seo_template:
+            template_section = (
+                "\n=== SEO ARTICLE TEMPLATE (follow exactly) ===\n"
+                f"{seo_template[:2500]}\n"
+            )
+
         prompt = f"""Create a detailed OUTLINE for an article targeting: "{article.target_keyword}"
 
 Content category: {article.content_category or 'general'}
@@ -786,7 +805,7 @@ Content category: {article.content_category or 'general'}
 {f'Category strategy: {category_hint}' if category_hint else ''}
 
 {f'Internal links available: {internal_links}' if internal_links else ''}
-{entity_section}{serp_section}{nhtsa_section}{revision_section}
+{entity_section}{serp_section}{nhtsa_section}{revision_section}{template_section}
 Create an outline with:
 1. **Hook** (first 100 words) — how to open with the keyword naturally
 2. **5-7 H2 sections** — each with:
@@ -835,6 +854,7 @@ Format as a clean outline with ## headers and bullet points."""
         self, article, outline: str, product_context: str,
         state_rules: str, internal_links: str,
         is_revision: bool, lessons: str,
+        seo_template: str = "",
     ) -> str:
         """Draft the article section-by-section using Flash.
 
@@ -850,6 +870,7 @@ Format as a clean outline with ## headers and bullet points."""
             prompt = self._build_prompt(
                 article, product_context, state_rules, internal_links,
                 is_revision=is_revision, lessons=lessons, outline=outline,
+                seo_template=seo_template,
             )
             return self.call_claude(
                 prompt=prompt,
@@ -871,6 +892,10 @@ Format as a clean outline with ## headers and bullet points."""
             context_block += f"=== INTERNAL LINKS ===\n{internal_links}\n\n"
         if lessons:
             context_block += f"=== PAST LESSONS ===\n{lessons}\n\n"
+        if seo_template:
+            context_block += (
+                f"=== SEO ARTICLE TEMPLATE ===\n{seo_template[:2000]}\n\n"
+            )
         if is_revision and article.revision_notes:
             context_block += (
                 f"=== REVISION FEEDBACK (address these issues) ===\n"
@@ -995,6 +1020,7 @@ Format as a clean outline with ## headers and bullet points."""
         is_revision: bool,
         lessons: str = "",
         outline: str = "",
+        seo_template: str = "",
     ) -> str:
         parts = []
 
@@ -1012,6 +1038,11 @@ Format as a clean outline with ## headers and bullet points."""
         if lessons:
             parts.append(
                 f"=== LESSONS FROM PAST REVIEWS (avoid these mistakes) ===\n{lessons}\n"
+            )
+
+        if seo_template:
+            parts.append(
+                f"=== SEO ARTICLE TEMPLATE (follow exactly) ===\n{seo_template}\n"
             )
 
         if outline:
@@ -1156,6 +1187,23 @@ Article:
         keyword = article.target_keyword or ""
         keyword_lower = keyword.lower()
 
+        # Pre-check: strip leaked placeholders and metadata artifacts.
+        artifact_patterns = [
+            r"(?im)^\s*infographic explaining[^\n]*$",
+            r"(?im)^\s*meta_description\s*:[^\n]*$",
+            r"(?im)^\s*meta_title\s*:[^\n]*$",
+            r"(?im)^\s*slug\s*:[^\n]*$",
+        ]
+        artifact_hits = 0
+        for pattern in artifact_patterns:
+            cleaned, replaced = re.subn(pattern, "", content)
+            if replaced:
+                content = cleaned
+                artifact_hits += replaced
+        if artifact_hits:
+            content = re.sub(r"\n{3,}", "\n\n", content).strip()
+            fixes.append(f"removed_{artifact_hits}_template_artifacts")
+
         # Check 1: Keyword in first 100 words (fuzzy match — allows stop words)
         if keyword_lower and not _keyword_match(keyword, content[:500]):
             # Insert keyword into the first paragraph naturally
@@ -1175,12 +1223,12 @@ Article:
                     )
                     fixes.append("inserted_keyword_first_100_words")
 
-        # Check 2: CTA placement — 4 CTAs (1 early, 2 contextual, 1 closing)
+        # Check 2: CTA placement — 3 CTAs (1 early, 1 contextual, 1 closing)
         content_lower = content.lower()
         cta_count = len(re.findall(r"claimcoach\.app", content_lower))
 
-        if cta_count < 4:
-            content, cta_fixes = self._ensure_four_ctas(content, keyword)
+        if cta_count < 3:
+            content, cta_fixes = self._ensure_three_ctas(content, keyword)
             fixes.extend(cta_fixes)
 
         # Check 3: FAQ section present
@@ -1306,14 +1354,22 @@ Article:
         # placeholder based on article topic.  Ezra renders these into
         # real HTML during publishing.
         if "<!-- TOOL:" not in content:
-            from tools.data import get_tool_for_article
+            from tools.data import (
+                get_tool_display_name,
+                get_tool_for_article,
+                get_tools_library_url,
+            )
             tool_id = get_tool_for_article(keyword, content)
             if tool_id:
                 state_attr = ""
                 if article.target_state:
                     state_attr = f' data-state="{article.target_state}"'
+                tool_name = get_tool_display_name(tool_id)
+                tools_url = get_tools_library_url()
                 placeholder = (
                     f"\n\n<!-- TOOL:{tool_id}:mini{state_attr} -->\n"
+                    f"\nTry the **{tool_name}** and browse more calculators here: "
+                    f"[ClaimCoach Tools]({tools_url}).\n"
                 )
                 # Insert after the second H2 (roughly after problem section)
                 h2_matches = list(re.finditer(r"\n##\s", content))
@@ -1337,14 +1393,13 @@ Article:
         return content, meta_description, fixes
 
     @staticmethod
-    def _ensure_four_ctas(content: str, keyword: str) -> tuple[str, list[str]]:
-        """Ensure the article has 4 strategically placed CTAs.
+    def _ensure_three_ctas(content: str, keyword: str) -> tuple[str, list[str]]:
+        """Ensure the article has 3 strategically placed CTAs.
 
         Strategy:
         1. Early CTA — within first 300 words (after emotional hook/problem)
         2. Contextual CTA — after line-items/mid-body section
-        3. Contextual CTA — after state-rules/second-body section
-        4. Closing CTA — in or after FAQ section
+        3. Closing CTA — in or after FAQ section
 
         Returns (modified_content, list_of_fixes).
         """
@@ -1358,8 +1413,6 @@ Article:
 
         # Split content into words for position tracking
         words = content.split()
-        total_words = len(words)
-
         # CTA copy variants (varied, not repetitive)
         cta_variants = [
             (
@@ -1375,11 +1428,9 @@ Article:
                 "\n\nGet your state-specific settlement analysis at "
                 "[ClaimCoach](https://claimcoach.app) — it takes 5 minutes.\n"
             ),
-            (
-                "\n\nDon't leave money on the table. "
-                "[ClaimCoach](https://claimcoach.app) analyzes your settlement "
-                "and shows you exactly where the insurer shortchanged you.\n"
-            ),
+            ("\n\nDon't leave money on the table. "
+             "[ClaimCoach](https://claimcoach.app) analyzes your settlement "
+             "and shows you exactly where the insurer shortchanged you.\n"),
         ]
 
         # If no ClaimCoach mention at all, treat all zones as missing
@@ -1403,13 +1454,10 @@ Article:
 
         mid_start = int(total_chars * 0.25)
         mid_end = int(total_chars * 0.55)
-        late_start = int(total_chars * 0.55)
-        late_end = int(total_chars * 0.80)
         closing_start = int(total_chars * 0.80)
 
         has_early = any(p < early_end for p in cta_positions)
         has_mid = any(mid_start <= p <= mid_end for p in cta_positions)
-        has_late = any(late_start <= p <= late_end for p in cta_positions)
         has_closing = any(p >= closing_start for p in cta_positions)
 
         needed: list[tuple[int, str]] = []  # (variant_idx, zone)
@@ -1417,10 +1465,8 @@ Article:
             needed.append((0, "early"))
         if not has_mid:
             needed.append((1, "mid"))
-        if not has_late:
-            needed.append((2, "late"))
         if not has_closing:
-            needed.append((3, "closing"))
+            needed.append((2, "closing"))
 
         if not needed:
             return content, fixes
@@ -1449,13 +1495,6 @@ Article:
                     insert_pos = h2_positions[2]
                 else:
                     insert_pos = int(total_chars * 0.4)
-
-            elif zone == "late":
-                # After the state-rules section (around 60-75%)
-                if len(h2_positions) >= 5:
-                    insert_pos = h2_positions[4]
-                else:
-                    insert_pos = int(total_chars * 0.65)
 
             elif zone == "closing":
                 # At the very end of the article
@@ -1797,7 +1836,7 @@ Article:
             (r"state|law|regulation|statute", f"Map showing {keyword} regulations by state"),
             (r"compare|vs|versus|difference", f"Side-by-side comparison table for {keyword} options"),
         ]
-        default_alt = f"Infographic explaining key factors in {keyword}"
+        default_alt = f"Breakdown of key factors that affect {keyword}"
 
         for i, part in enumerate(sections):
             result_parts.append(part)
@@ -1920,7 +1959,7 @@ Article:
     # ------------------------------------------------------------------
 
     MIN_WORD_COUNT = 1000
-    MAX_WORD_COUNT = 1500
+    MAX_WORD_COUNT = 1800
     MIN_READABILITY = 40
 
     def _passes_minimum_bar(self, content: str, wc: int) -> tuple[bool, str]:
@@ -1994,7 +2033,7 @@ Article:
                 # CTA placement issues
                 "no mid-article", "closing section",
                 "no cta in first", "only 1 cta", "only 2 cta", "only 3 cta",
-                "first 300 words", "need 4 cta", "target: 4",
+                "first 300 words", "need 3 cta", "target: 3",
             )):
                 targeted.append(issue)
             else:

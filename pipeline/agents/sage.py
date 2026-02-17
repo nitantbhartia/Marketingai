@@ -339,8 +339,8 @@ class SageAgent(BaseAgent):
         wc = word_count(content)
         wc_score = 0.0
         wc_issues = []
-        target_lo, target_hi = self._calibration.get("word_count_target", (1800, 2200))
-        ok_lo, ok_hi = self._calibration.get("word_count_ok", (1500, 2500))
+        target_lo, target_hi = self._calibration.get("word_count_target", (1200, 1800))
+        ok_lo, ok_hi = self._calibration.get("word_count_ok", (1000, 2000))
         if target_lo <= wc <= target_hi:
             wc_score = 4
         elif ok_lo <= wc <= ok_hi:
@@ -769,12 +769,12 @@ Format each issue on its own line starting with "- "."""
         return f"{first}\n\n[... middle section ...]\n\n{middle}\n\n[... end section ...]\n\n{last}"
 
     def _check_cta(self, content: str) -> tuple[float, list[str]]:
-        """Check for ClaimCoach CTA — conversion-focused 4-CTA scoring.
+        """Check for ClaimCoach CTA — conversion-focused 3-CTA scoring.
 
         Scores for presence, early placement, and distribution:
         - ClaimCoach linked (not just mentioned) (1 pt)
         - Early CTA within first 300 words (1.5 pts)
-        - 3+ CTA links spread across the article (1.5 pts)
+        - 3 CTA links spread across the article (1.5 pts)
         - Benefit-driven CTA copy, not just brand mention (1 pt)
         """
         issues: list[str] = []
@@ -794,7 +794,7 @@ Format each issue on its own line starting with "- "."""
             issues.append("ClaimCoach mentioned but no link to claimcoach.app")
             # Still check benefit copy below, but other placement checks need links
         else:
-            issues.append("No mention of ClaimCoach — need 4 CTAs linking to claimcoach.app")
+            issues.append("No mention of ClaimCoach — need 3 CTAs linking to claimcoach.app")
             return score, issues
 
         # 1.5 pts: Early CTA within first 300 words
@@ -818,16 +818,17 @@ Format each issue on its own line starting with "- "."""
             )
 
         # 1.5 pts: At least 3 CTA links spread across the article
-        if len(cta_links) >= 4:
+        if len(cta_links) >= 3:
             score += 1.5
-        elif len(cta_links) >= 3:
-            score += 1.0
-            issues.append(f"Only {len(cta_links)} CTAs (target: 4 — early, 2 contextual, closing)")
         elif len(cta_links) >= 2:
-            score += 0.5
-            issues.append(f"Only {len(cta_links)} CTAs (target: 4)")
+            score += 1.0
+            issues.append(
+                f"Only {len(cta_links)} CTAs (target: 3 — early, contextual, closing)"
+            )
         else:
-            issues.append(f"Only {len(cta_links)} CTA link(s) — need 4 spread across the article")
+            issues.append(
+                f"Only {len(cta_links)} CTA link(s) — need 3 spread across the article"
+            )
 
         # 1 pt: Benefit-driven CTA copy (not just brand name)
         benefit_patterns = [
@@ -1123,8 +1124,8 @@ Format each issue on its own line starting with "- "."""
         quill_perf = self.db.get_lessons("quill", category="performance")
 
         calibration: dict[str, Any] = {
-            "word_count_target": (1200, 1500),  # default — conversion-focused
-            "word_count_ok": (1000, 1600),       # default acceptable range
+            "word_count_target": (1200, 1800),  # default — conversion + SEO depth
+            "word_count_ok": (1000, 2000),      # default acceptable range
         }
 
         for lesson in quill_perf:

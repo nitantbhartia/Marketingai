@@ -112,6 +112,7 @@ class PipelineSettings:
     database_path: str = "pipeline.db"
     product_context_path: str = "reference/PRODUCT_CONTEXT.md"
     state_rules_path: str = "reference/STATE_RULES.md"
+    seo_template_path: str = "reference/SEO_ARTICLE_TEMPLATE.md"
     blog_output_dir: str = "output/blog"
     min_backlog_topics: int = 15
     articles_per_week_target: int = 7
@@ -303,6 +304,13 @@ class Config:
     def load_state_rules(self) -> str:
         """Load STATE_RULES.md content."""
         path = self.resolve_path(self.pipeline.state_rules_path)
+        if path.exists():
+            return path.read_text()
+        return ""
+
+    def load_seo_template(self) -> str:
+        """Load SEO article template guidance."""
+        path = self.resolve_path(self.pipeline.seo_template_path)
         if path.exists():
             return path.read_text()
         return ""

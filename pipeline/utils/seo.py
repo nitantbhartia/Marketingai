@@ -89,15 +89,15 @@ def score_seo(
     else:
         issues.append("No meta description")
 
-    # Internal links (3 pts)
-    if len(internal_links) >= 5:
+    # Internal links (3 pts) — target 3-5 contextual links
+    if len(internal_links) >= 3:
         score += 3
-    elif len(internal_links) >= 3:
+    elif len(internal_links) >= 2:
         score += 2
-        issues.append(f"Only {len(internal_links)} internal links (need 5+)")
+        issues.append(f"Only {len(internal_links)} internal links (target 3+)")
     elif len(internal_links) >= 1:
         score += 1
-        issues.append(f"Only {len(internal_links)} internal links (need 5+)")
+        issues.append(f"Only {len(internal_links)} internal links (target 3+)")
     else:
         issues.append("No internal links")
 

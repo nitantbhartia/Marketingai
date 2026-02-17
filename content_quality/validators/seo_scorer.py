@@ -59,9 +59,26 @@ class SEOScorer:
         keyword_lower = keyword.lower()
         return keyword_lower in slug_lower
 
+    @staticmethod
+    def _keyword_match(keyword: str, text: str) -> bool:
+        """Fuzzy keyword match to avoid brittle exact-phrase failures."""
+        kw = (keyword or "").lower().strip()
+        txt = (text or "").lower()
+        if not kw:
+            return False
+        if kw in txt:
+            return True
+        parts = kw.split()
+        if len(parts) <= 1:
+            return False
+        pattern = r"\b" + r"\b.{0,30}\b".join(re.escape(w) for w in parts) + r"\b"
+        if re.search(pattern, txt):
+            return True
+        return all(re.search(r"\b" + re.escape(w) + r"\b", txt) for w in parts)
+
     def _check_keyword_in_title(self, meta_title: str, keyword: str) -> Dict:
         """Check if keyword appears in title (8 points)."""
-        passed = keyword.lower() in meta_title.lower()
+        passed = self._keyword_match(keyword, meta_title)
         return {
             "passed": passed,
             "points_earned": 8 if passed else 0,
@@ -82,7 +99,7 @@ class SEOScorer:
 
     def _check_keyword_in_meta_description(self, meta_description: str, keyword: str) -> Dict:
         """Check if keyword appears in meta description (5 points)."""
-        passed = keyword.lower() in meta_description.lower()
+        passed = self._keyword_match(keyword, meta_description)
         return {
             "passed": passed,
             "points_earned": 5 if passed else 0,
@@ -114,7 +131,7 @@ class SEOScorer:
     def _check_keyword_in_first_100_words(self, article_markdown: str, keyword: str) -> Dict:
         """Check if keyword appears in first 100 words (8 points)."""
         first_100 = extract_first_n_words(article_markdown, 100)
-        passed = keyword.lower() in first_100.lower()
+        passed = self._keyword_match(keyword, first_100)
         return {
             "passed": passed,
             "points_earned": 8 if passed else 0,
@@ -127,18 +144,22 @@ class SEOScorer:
         headings = extract_headings(article_markdown)
         h2_headings = [text for level, text in headings if level == 2]
 
-        count = sum(1 for h2 in h2_headings if keyword.lower() in h2.lower())
-        passed = count >= 2
+        count = sum(1 for h2 in h2_headings if self._keyword_match(keyword, h2))
+        passed = count >= 1
 
         return {
             "passed": passed,
-            "points_earned": 7 if passed else 0,
+            "points_earned": 7 if count >= 2 else (4 if count == 1 else 0),
             "points_possible": 7,
-            "message": f"✓ Keyword in {count} H2 headings (minimum: 2)" if passed else f"✗ Keyword found in {count} H2s (minimum: 2)"
+            "message": (
+                f"✓ Keyword in {count} H2 headings (target: 1+, ideal: 2+)"
+                if passed
+                else "✗ Keyword not found in H2 headings (target: 1+)"
+            )
         }
 
     def _check_h2_frequency(self, article_markdown: str) -> Dict:
-        """Check H2 heading every 200-400 words on average (5 points)."""
+        """Check H2 heading cadence (about every 140-360 words)."""
         headings = extract_headings(article_markdown)
         h2_count = sum(1 for level, _ in headings if level == 2)
         total_words = word_count(article_markdown)
@@ -152,13 +173,17 @@ class SEOScorer:
             }
 
         avg_words = total_words / h2_count
-        passed = 200 <= avg_words <= 400
+        passed = 140 <= avg_words <= 360
 
         return {
             "passed": passed,
             "points_earned": 5 if passed else 0,
             "points_possible": 5,
-            "message": f"✓ Average {int(avg_words)} words between H2s (target: 200-400)" if passed else f"✗ Average {int(avg_words)} words between H2s (target: 200-400)"
+            "message": (
+                f"✓ Average {int(avg_words)} words between H2s (target: 140-360)"
+                if passed
+                else f"✗ Average {int(avg_words)} words between H2s (target: 140-360)"
+            )
         }
 
     def _check_h2_count(self, article_markdown: str) -> Dict:
@@ -219,6 +244,13 @@ class SEOScorer:
         """Check external links point to authoritative domains (5 points)."""
         links = extract_links(article_markdown)
         external_links = [url for url, _ in links if not is_internal_link(url, "claimcoach.app")]
+        if len(external_links) < 2:
+            return {
+                "passed": False,
+                "points_earned": 0,
+                "points_possible": 5,
+                "message": "✗ Not enough external links to assess quality (minimum: 2)"
+            }
 
         low_authority = []
         for url in external_links:
@@ -253,16 +285,39 @@ class SEOScorer:
         }
 
     def _check_cta_present(self, article_markdown: str) -> Dict:
-        """Check article contains CTA linking to claimcoach.app (4 points)."""
+        """Check article has 3 CTAs with one early placement (4 points)."""
         links = extract_links(article_markdown)
-        has_cta = any("claimcoach.app" in url.lower() and not "/blog" in url.lower()
-                      for url, _ in links)
+        cta_links = [
+            url for url, _ in links
+            if "claimcoach.app" in url.lower() and "/blog" not in url.lower()
+        ]
+        cta_count = len(cta_links)
+
+        words = article_markdown.split()
+        first_300 = " ".join(words[:300]).lower()
+        early_cta = "claimcoach.app" in first_300
+
+        points = 0
+        if cta_count >= 1:
+            points += 1
+        if cta_count >= 2:
+            points += 1
+        if cta_count >= 3:
+            points += 1
+        if early_cta:
+            points += 1
+
+        passed = cta_count >= 3 and early_cta
 
         return {
-            "passed": has_cta,
-            "points_earned": 4 if has_cta else 0,
+            "passed": passed,
+            "points_earned": points,
             "points_possible": 4,
-            "message": "✓ CTA linking to claimcoach.app found" if has_cta else "✗ No call-to-action found linking to claimcoach.app"
+            "message": (
+                f"✓ CTA coverage: {cta_count} link(s), early CTA {'present' if early_cta else 'missing'}"
+                if passed
+                else f"✗ CTA coverage weak: {cta_count} link(s), early CTA {'present' if early_cta else 'missing'} (target: 3 + early)"
+            )
         }
 
     def _check_image_alt_text(self, article_markdown: str, keyword: str) -> Dict:

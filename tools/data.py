@@ -229,6 +229,15 @@ TOOL_TOPIC_MAP: dict[str, list[str]] = {
     ],
 }
 
+TOOL_DISPLAY_NAMES: dict[str, str] = {
+    "sales_tax_calculator": "Sales Tax Calculator",
+    "settlement_checklist": "Settlement Checklist",
+    "fairness_quiz": "Offer Fairness Quiz",
+    "car_worth_estimator": "Car Worth Estimator",
+}
+
+TOOLS_LIBRARY_URL = "https://claimcoach.app/tools"
+
 
 # ---------------------------------------------------------------------------
 # Calculation functions
@@ -406,6 +415,16 @@ def get_tool_for_article(keyword: str, content: str = "") -> str | None:
 
     # Default: fairness quiz works for any reader
     return best_tool or "fairness_quiz"
+
+
+def get_tool_display_name(tool_id: str) -> str:
+    """Return a human-friendly tool name."""
+    return TOOL_DISPLAY_NAMES.get(tool_id, "Calculator")
+
+
+def get_tools_library_url() -> str:
+    """Return the public tools hub URL."""
+    return TOOLS_LIBRARY_URL
 
 
 def export_tool_data_json() -> str:

@@ -57,6 +57,7 @@ pipeline:
   database_path: "pipeline.db"
   product_context_path: "reference/PRODUCT_CONTEXT.md"
   state_rules_path: "reference/STATE_RULES.md"
+  seo_template_path: "reference/SEO_ARTICLE_TEMPLATE.md"
   blog_output_dir: "output/blog"
   min_backlog_topics: 15
   articles_per_week_target: 4

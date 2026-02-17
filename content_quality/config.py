@@ -30,8 +30,8 @@ STATE_RULES_PATH = str(REFERENCE_DIR / "STATE_RULES.md")
 # Validation thresholds
 MIN_READABILITY_SCORE = int(os.environ.get("MIN_READABILITY_SCORE", "60"))  # Flesch-Kincaid
 MIN_SEO_SCORE = int(os.environ.get("MIN_SEO_SCORE", "80"))  # out of 100
-MIN_WORD_COUNT = int(os.environ.get("MIN_WORD_COUNT", "1800"))
-MAX_WORD_COUNT = int(os.environ.get("MAX_WORD_COUNT", "2200"))
+MIN_WORD_COUNT = int(os.environ.get("MIN_WORD_COUNT", "1200"))
+MAX_WORD_COUNT = int(os.environ.get("MAX_WORD_COUNT", "1800"))
 MIN_SPECIFICITY_ITEMS = int(os.environ.get("MIN_SPECIFICITY_ITEMS", "5"))  # dollar amounts, statute citations
 MIN_FAQ_QUESTIONS = int(os.environ.get("MIN_FAQ_QUESTIONS", "3"))
 META_DESC_MIN_LENGTH = int(os.environ.get("META_DESC_MIN_LENGTH", "140"))
