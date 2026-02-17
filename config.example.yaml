@@ -64,6 +64,7 @@ pipeline:
   daily_article_cap: 8
   daily_promote_cap: 8
   max_revision_rounds: 5
+  quill_stale_recovery_hours: 4
   approval_score_threshold: 80
   dashboard_url: "http://localhost:8000"  # Review dashboard URL (set to empty to disable notifications)
   quill_use_strategy_on_high_trust_only: true

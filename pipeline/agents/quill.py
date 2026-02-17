@@ -328,6 +328,8 @@ class QuillAgent(BaseAgent):
         at least 1 slot is always reserved for new TODO articles.  This
         prevents revision loops from starving the pipeline of fresh content.
         """
+        recovered = self._recover_stale_in_progress()
+
         max_per_run = getattr(self.config.pipeline, "max_articles_per_run", 3)
         daily_cap = max(1, int(getattr(self.config.pipeline, "daily_article_cap", 8)))
         written_today = self._count_written_today()
@@ -336,7 +338,12 @@ class QuillAgent(BaseAgent):
                 f"Daily article cap reached: {written_today}/{daily_cap}. "
                 "Skipping Quill run."
             )
-            return {"status": "idle", "reason": "daily_cap_reached", "written_today": written_today}
+            return {
+                "status": "idle",
+                "reason": "daily_cap_reached",
+                "written_today": written_today,
+                "recovered_stale_in_progress": recovered,
+            }
 
         remaining_quota = max(0, daily_cap - written_today)
         max_per_run = min(max_per_run, remaining_quota)
@@ -358,16 +365,54 @@ class QuillAgent(BaseAgent):
 
         if not results:
             logger.info("No articles available to write")
-            return {"status": "idle", "reason": "no_articles"}
+            return {
+                "status": "idle",
+                "reason": "no_articles",
+                "recovered_stale_in_progress": recovered,
+            }
 
         if len(results) == 1:
+            results[0]["recovered_stale_in_progress"] = recovered
             return results[0]
 
         return {
             "status": "batch_complete",
             "articles_written": len([r for r in results if r["status"] == "success"]),
+            "recovered_stale_in_progress": recovered,
             "results": results,
         }
+
+    def _recover_stale_in_progress(self) -> int:
+        """Move stale in_progress rows back to todo so work can resume.
+
+        This catches crashed workers or lost claims when Quill is invoked
+        outside dashboard pre-hooks.
+        """
+        hours = max(
+            1, int(getattr(self.config.pipeline, "quill_stale_recovery_hours", 4))
+        )
+        stale = self.db.get_stuck_articles(hours=hours)
+        stale_in_progress = [
+            a for a in stale if a.status == ArticleStatus.IN_PROGRESS.value
+        ]
+        for article in stale_in_progress:
+            self.db.update_article(
+                article.id,
+                status=ArticleStatus.TODO.value,
+                writer_claim="",
+            )
+        if stale_in_progress:
+            self.db.record_metric(
+                "quill_recovered_stale_in_progress",
+                len(stale_in_progress),
+                json.dumps({"hours": hours}),
+            )
+            logger.warning(
+                "Recovered %s stale in_progress article(s) to todo (>%sh old)",
+                len(stale_in_progress),
+                hours,
+            )
+        return len(stale_in_progress)
 
     def _count_written_today(self) -> int:
         """Count successful Quill writes since UTC midnight."""

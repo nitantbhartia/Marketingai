@@ -120,6 +120,7 @@ class PipelineSettings:
     daily_article_cap: int = 8
     daily_promote_cap: int = 8
     max_revision_rounds: int = 5
+    quill_stale_recovery_hours: int = 4
     approval_score_threshold: int = 80
     dashboard_url: str = ""
     # Cost-control switches
