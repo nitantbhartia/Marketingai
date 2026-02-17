@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from pipeline.agents.base import BaseAgent
@@ -24,51 +25,81 @@ logger = logging.getLogger(__name__)
 class ScoutAgent(BaseAgent):
     name = "scout"
 
+    _STOPWORDS = {
+        "a", "an", "the", "and", "or", "for", "to", "of", "in", "on", "at",
+        "with", "from", "by", "how", "what", "when", "why", "your", "you",
+        "is", "are", "can", "do", "does", "my", "vs", "guide",
+    }
+    _US_STATES = {
+        "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+        "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+        "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+        "maine", "maryland", "massachusetts", "michigan", "minnesota",
+        "mississippi", "missouri", "montana", "nebraska", "nevada",
+        "new hampshire", "new jersey", "new mexico", "new york",
+        "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+        "pennsylvania", "rhode island", "south carolina", "south dakota",
+        "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+        "west virginia", "wisconsin", "wyoming",
+    }
+
     def run(self) -> dict[str, Any]:
         """Research topics and populate backlog."""
         existing_count = self.db.count_articles(ArticleStatus.BACKLOG.value)
         logger.info(f"Current backlog: {existing_count} topics")
 
-        # Get existing keywords to avoid duplicates and cannibalization
+        # Build intent index to avoid duplicates/cannibalization.
         all_articles = self.db.query_articles(limit=5000)
         existing_keywords = {a.target_keyword.lower() for a in all_articles if a.target_keyword}
-        # Build normalized word-set index for cannibalization detection
-        existing_word_sets = {
-            kw: frozenset(kw.split()) for kw in existing_keywords
-        }
+        intent_index = []
+        cluster_primary: dict[str, str] = {}
+        for a in all_articles:
+            kw = (a.target_keyword or "").strip()
+            if not kw:
+                continue
+            tokens = self._intent_tokens(kw)
+            cluster = self._cluster_key(kw)
+            primary = self._primary_url_for_article(a)
+            intent_index.append(
+                {
+                    "keyword": kw.lower(),
+                    "tokens": tokens,
+                    "cluster": cluster,
+                    "state": (a.target_state or self._state_hint(kw)),
+                    "primary_url": primary,
+                }
+            )
+            if cluster and primary and cluster not in cluster_primary:
+                cluster_primary[cluster] = primary
 
         # Phase 1: Seed topics (always available, no API needed)
         topics = get_all_seed_topics()
         new_count = 0
-        skipped = 0
+        skipped_duplicates = 0
+        skipped_cannibal = 0
 
         for topic in topics:
             kw = topic["keyword"]
             if kw.lower() in existing_keywords:
-                skipped += 1
+                skipped_duplicates += 1
                 continue
-            # Cannibalization check: if the new keyword's words overlap 85%+
-            # with an existing keyword, they target the same search intent.
-            kw_words = frozenset(kw.lower().split())
-            is_cannibal = False
-            for ex_kw, ex_words in existing_word_sets.items():
-                if not kw_words or not ex_words:
-                    continue
-                overlap = len(kw_words & ex_words)
-                similarity = overlap / max(len(kw_words), len(ex_words))
-                if similarity >= 0.85 and kw.lower() != ex_kw:
-                    logger.info(
-                        f"Skipping '{kw}' — cannibalizes existing '{ex_kw}' "
-                        f"({similarity:.0%} word overlap)"
-                    )
-                    is_cannibal = True
-                    skipped += 1
-                    break
-            if is_cannibal:
+            conflict = self._find_cannibalization_conflict(kw, topic.get("state", ""), intent_index)
+            if conflict:
+                logger.info(
+                    f"Skipping '{kw}' — cannibalizes cluster '{conflict['cluster']}' "
+                    f"(primary URL: {conflict['primary_url']})"
+                )
+                skipped_cannibal += 1
                 continue
 
+            cluster = self._cluster_key(kw)
+            primary_url = cluster_primary.get(cluster)
+            if not primary_url:
+                primary_url = self._default_primary_url(kw)
+                cluster_primary[cluster] = primary_url
+
             # Generate content brief
-            brief = self._generate_brief(topic)
+            brief = self._generate_brief(topic, cluster, primary_url)
 
             self.db.create_article(
                 title=topic.get("suggested_title", ""),
@@ -83,6 +114,15 @@ class ScoutAgent(BaseAgent):
                 suggested_title=self._suggest_title(kw, topic.get("category", "")),
             )
             existing_keywords.add(kw.lower())
+            intent_index.append(
+                {
+                    "keyword": kw.lower(),
+                    "tokens": self._intent_tokens(kw),
+                    "cluster": cluster,
+                    "state": topic.get("state", "") or self._state_hint(kw),
+                    "primary_url": primary_url,
+                }
+            )
             new_count += 1
 
         # Phase 2: Discover related keywords via autocomplete
@@ -99,9 +139,27 @@ class ScoutAgent(BaseAgent):
             related = discover_related_keywords(base)
             for kw in related:
                 if kw.lower() in existing_keywords:
+                    skipped_duplicates += 1
                     continue
                 if not self._is_relevant(kw):
                     continue
+                conflict = self._find_cannibalization_conflict(kw, "", intent_index)
+                if conflict:
+                    skipped_cannibal += 1
+                    continue
+
+                cluster = self._cluster_key(kw)
+                primary_url = cluster_primary.get(cluster)
+                if not primary_url:
+                    primary_url = self._default_primary_url(kw)
+                    cluster_primary[cluster] = primary_url
+
+                brief = (
+                    f"Write a comprehensive guide about: {kw}\n\n"
+                    f"Cluster key: {cluster}\n"
+                    f"Primary URL for this cluster: {primary_url}\n"
+                    "Do not cannibalize the primary URL intent."
+                )
 
                 self.db.create_article(
                     status=ArticleStatus.BACKLOG.value,
@@ -109,11 +167,20 @@ class ScoutAgent(BaseAgent):
                     search_volume=100,  # Estimated
                     keyword_difficulty=0.25,
                     commercial_intent=0.7,
-                    content_brief=f"Write a comprehensive guide about: {kw}",
+                    content_brief=brief,
                     content_category="discovered",
                     suggested_title=self._suggest_title(kw, "discovered"),
                 )
                 existing_keywords.add(kw.lower())
+                intent_index.append(
+                    {
+                        "keyword": kw.lower(),
+                        "tokens": self._intent_tokens(kw),
+                        "cluster": cluster,
+                        "state": self._state_hint(kw),
+                        "primary_url": primary_url,
+                    }
+                )
                 discovered += 1
 
         # Load lessons about which categories perform well
@@ -124,10 +191,11 @@ class ScoutAgent(BaseAgent):
         # 5 RPM when spaced by the global rate_limit_delay).
         unbriefed = self.db.query_articles(status=ArticleStatus.BACKLOG.value, limit=15)
         if performance_hints:
-            # Prioritize articles in high-performing categories
+            # Prioritize high-pass categories and push known low-pass
+            # categories to the back of the briefing queue.
             unbriefed = sorted(
                 unbriefed,
-                key=lambda a: a.content_category in performance_hints.get("preferred", []),
+                key=lambda a: self._brief_priority(a, performance_hints),
                 reverse=True,
             )
         max_ai_briefs = 5
@@ -139,7 +207,15 @@ class ScoutAgent(BaseAgent):
                 if article.content_brief and len(article.content_brief) > 200 and not article.content_brief.startswith("Write a comprehensive"):
                     continue
                 try:
-                    brief = self._ai_generate_brief(article.target_keyword, article.content_category)
+                    cluster = self._cluster_key(article.target_keyword or "")
+                    primary_url = cluster_primary.get(cluster) or self._default_primary_url(article.target_keyword or "")
+                    cluster_primary[cluster] = primary_url
+                    brief = self._ai_generate_brief(
+                        article.target_keyword,
+                        article.content_category,
+                        cluster_key=cluster,
+                        primary_url=primary_url,
+                    )
                     title = self._ai_suggest_title(article.target_keyword)
                     self.db.update_article(
                         article.id,
@@ -173,7 +249,8 @@ class ScoutAgent(BaseAgent):
         self.db.record_metric("scout_run", new_count + discovered, json.dumps({
             "seed_added": new_count,
             "discovered": discovered,
-            "skipped_duplicates": skipped,
+            "skipped_duplicates": skipped_duplicates,
+            "skipped_cannibalization": skipped_cannibal,
             "ai_briefed": briefed,
             "promoted_to_todo": promoted,
             "final_backlog": final_backlog,
@@ -182,7 +259,8 @@ class ScoutAgent(BaseAgent):
         summary = {
             "seed_topics_added": new_count,
             "discovered_topics": discovered,
-            "skipped_duplicates": skipped,
+            "skipped_duplicates": skipped_duplicates,
+            "skipped_cannibalization": skipped_cannibal,
             "ai_briefed": briefed,
             "promoted_to_todo": promoted,
             "final_backlog": final_backlog,
@@ -190,7 +268,34 @@ class ScoutAgent(BaseAgent):
         logger.info(f"Scout complete: {summary}")
         return summary
 
-    def _generate_brief(self, topic: dict) -> str:
+    @staticmethod
+    def _brief_priority(article, hints: dict) -> tuple[float, int, float, int]:
+        """Priority key for AI briefing queue.
+
+        Higher is better:
+        1. Categories with repeated high-pass lessons
+        2. Higher commercial intent and search volume
+        3. Newer rows as tie-breaker
+        Categories repeatedly marked low-pass are deprioritized but not dropped.
+        """
+        preferred = set(hints.get("preferred", []))
+        avoid = set(hints.get("avoid", []))
+        category = article.content_category or ""
+
+        bucket = 0.0
+        if category in preferred:
+            bucket += 2.0
+        if category in avoid:
+            bucket -= 2.0
+
+        return (
+            bucket,
+            int(getattr(article, "search_volume", 0) or 0),
+            float(getattr(article, "commercial_intent", 0.0) or 0.0),
+            int(getattr(article, "id", 0) or 0),
+        )
+
+    def _generate_brief(self, topic: dict, cluster_key: str, primary_url: str) -> str:
         """Generate a content brief from topic data."""
         category = topic.get("category", "")
         kw = topic["keyword"]
@@ -233,7 +338,14 @@ class ScoutAgent(BaseAgent):
                 f"and provide practical next steps."
             ),
         }
-        return briefs.get(category, f"Write a comprehensive guide about: {kw}")
+        base = briefs.get(category, f"Write a comprehensive guide about: {kw}")
+        cluster_block = (
+            "\n\nCluster canonicalization:\n"
+            f"- Cluster key: {cluster_key}\n"
+            f"- Primary URL for this intent cluster: {primary_url}\n"
+            "- This article must target a distinct intent and avoid cannibalizing the primary URL.\n"
+        )
+        return base + cluster_block
 
     def _suggest_title(self, keyword: str, category: str) -> str:
         """Generate a suggested article title."""
@@ -258,6 +370,80 @@ class ScoutAgent(BaseAgent):
         ]
         kw_lower = keyword.lower()
         return any(term in kw_lower for term in relevant_terms)
+
+    @classmethod
+    def _intent_tokens(cls, keyword: str) -> set[str]:
+        raw = re.sub(r"[^a-z0-9\s]", " ", (keyword or "").lower())
+        tokens = [t for t in raw.split() if len(t) > 2 and t not in cls._STOPWORDS]
+        return set(tokens)
+
+    @classmethod
+    def _state_hint(cls, keyword: str) -> str:
+        text = (keyword or "").lower()
+        for state in cls._US_STATES:
+            if state in text:
+                return state
+        return ""
+
+    def _cluster_key(self, keyword: str) -> str:
+        tokens = sorted(self._intent_tokens(keyword))
+        if not tokens:
+            return ""
+        return "-".join(tokens[:4])
+
+    @staticmethod
+    def _default_primary_url(keyword: str) -> str:
+        slug = re.sub(r"[^a-z0-9\s-]", "", keyword.lower())
+        slug = re.sub(r"[\s]+", "-", slug).strip("-")
+        return f"https://claimcoach.app/blog/{slug[:80]}"
+
+    def _primary_url_for_article(self, article) -> str:
+        if article.published_url:
+            return article.published_url
+        if article.slug:
+            return f"https://claimcoach.app/blog/{article.slug}"
+        kw = article.target_keyword or article.title or ""
+        return self._default_primary_url(kw) if kw else ""
+
+    def _find_cannibalization_conflict(
+        self, keyword: str, target_state: str, intent_index: list[dict]
+    ) -> dict | None:
+        """Return conflicting intent-cluster entry if keyword overlaps existing intent."""
+        kw = (keyword or "").strip().lower()
+        if not kw:
+            return None
+
+        tokens = self._intent_tokens(kw)
+        if len(tokens) < 2:
+            return None
+        cluster = self._cluster_key(kw)
+        state = (target_state or self._state_hint(kw) or "").lower()
+
+        for ex in intent_index:
+            ex_kw = ex.get("keyword", "")
+            ex_tokens = ex.get("tokens", set())
+            ex_cluster = ex.get("cluster", "")
+            ex_state = (ex.get("state") or "").lower()
+
+            if kw == ex_kw:
+                return ex
+
+            # Treat state-specific and non-state intents as distinct clusters.
+            if (state or ex_state) and state != ex_state:
+                continue
+
+            if cluster and ex_cluster and cluster == ex_cluster:
+                return ex
+
+            if not ex_tokens:
+                continue
+            inter = len(tokens & ex_tokens)
+            union = len(tokens | ex_tokens)
+            similarity = (inter / union) if union else 0.0
+            if similarity >= 0.7:
+                return ex
+
+        return None
 
     def _load_performance_hints(self) -> dict:
         """Load lessons from Sage/Morgan about which categories and topics perform well."""
@@ -332,7 +518,9 @@ GAPS:
             logger.warning(f"Gap analysis failed for '{keyword}': {e}")
             return ""
 
-    def _ai_generate_brief(self, keyword: str, category: str) -> str:
+    def _ai_generate_brief(
+        self, keyword: str, category: str, cluster_key: str = "", primary_url: str = ""
+    ) -> str:
         """Use Claude to generate a detailed content brief."""
         # Include performance insights if available
         perf_section = ""
@@ -350,6 +538,12 @@ GAPS:
             perf_section += "\n\nHigh-engagement community topics (from Lurker):\n"
             for topic in hints["community_demand"][:3]:
                 perf_section += f"- {topic}\n"
+        if category and category in set(hints.get("avoid", [])):
+            perf_section += (
+                "\n\nQuality caution:\n"
+                "- This category has low first-pass review performance.\n"
+                "- Use tighter structure, explicit citations, and avoid generic filler.\n"
+            )
 
         # Run gap analysis to find what competitors miss
         gap_analysis = self._analyze_competitor_gaps(keyword)
@@ -357,13 +551,22 @@ GAPS:
         if gap_analysis:
             gap_section = f"\n\nCompetitor Gap Analysis (cover these gaps that existing articles miss):\n{gap_analysis}\n"
 
+        cluster_section = ""
+        if cluster_key and primary_url:
+            cluster_section = (
+                "\n\nCluster canonicalization requirements:\n"
+                f"- Cluster key: {cluster_key}\n"
+                f"- Primary URL for this cluster: {primary_url}\n"
+                "- Ensure this new article targets a distinct intent and does not cannibalize the primary URL.\n"
+            )
+
         prompt = f"""Generate a content brief for an SEO article targeting the keyword: "{keyword}"
 
 Category: {category}
 
 The article is for ClaimCoach (claimcoach.app), an AI tool that helps car owners fight
 lowball insurance total loss settlement offers.
-{perf_section}{gap_section}
+{perf_section}{gap_section}{cluster_section}
 Provide:
 1. Suggested angle/hook (2 sentences)
 2. Key points to cover (5-7 bullets)
@@ -374,11 +577,19 @@ Provide:
 
 Keep it concise — this is a brief, not the article."""
 
-        return self.call_claude(
+        brief = self.call_claude(
             prompt,
             model=self.strategy_model,
             max_tokens=500,
         )
+        if cluster_key and primary_url:
+            brief += (
+                "\n\nCluster canonicalization:\n"
+                f"- Cluster key: {cluster_key}\n"
+                f"- Primary URL for this intent cluster: {primary_url}\n"
+                "- This article must target distinct intent and avoid cannibalization."
+            )
+        return brief
 
     def _ai_suggest_title(self, keyword: str) -> str:
         """Use Claude to suggest an SEO-optimized title."""

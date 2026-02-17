@@ -40,15 +40,32 @@ class SerpInsight:
     avg_competitor_word_count: int = 0
     # Content gaps — topics competitors cover that we should too
     content_gaps: list[str] = field(default_factory=list)
+    # FAQ themes extracted from PAA / related searches
+    faq_themes: list[str] = field(default_factory=list)
 
     def to_outline_context(self) -> str:
         """Format SERP data for injection into Quill's outline prompt."""
         parts: list[str] = []
 
+        if self.competitors:
+            parts.append("=== TOP RANKING PAGES (SERP Top 10 benchmark) ===")
+            for c in self.competitors[:10]:
+                title = c.get("title", "").strip()
+                url = c.get("url", "").strip()
+                if title and url:
+                    parts.append(f"- {title} — {url}")
+            parts.append("")
+
         if self.paa_questions:
             parts.append("=== PEOPLE ALSO ASK (your FAQ section MUST answer these) ===")
             for q in self.paa_questions[:6]:
                 parts.append(f"- {q}")
+            parts.append("")
+
+        if self.faq_themes:
+            parts.append("=== FAQ THEMES (cluster these in your FAQ and H2s) ===")
+            for t in self.faq_themes[:8]:
+                parts.append(f"- {t}")
             parts.append("")
 
         if self.related_searches:
@@ -67,6 +84,7 @@ class SerpInsight:
             parts.append("=== CONTENT GAPS (topics competitors miss — your opportunity) ===")
             for g in self.content_gaps[:5]:
                 parts.append(f"- {g}")
+            parts.append("NON-NEGOTIABLE: every content gap above must be covered in the article.")
             parts.append("")
 
         if self.avg_competitor_word_count > 0:
@@ -301,6 +319,16 @@ class SerpAnalyzer:
                 insight.competitors
             )
 
+        insight.faq_themes = self._extract_faq_themes(
+            insight.paa_questions, insight.related_searches
+        )
+        insight.content_gaps = self._infer_content_gaps(
+            keyword=keyword,
+            state=state,
+            competitor_headings=insight.competitor_headings,
+            paa_questions=insight.paa_questions,
+        )
+
         return insight
 
     @staticmethod
@@ -330,3 +358,89 @@ class SerpAnalyzer:
                     seen.add(phrase.lower())
 
         return headings[:12]
+
+    @staticmethod
+    def _extract_faq_themes(
+        paa_questions: list[str], related_searches: list[str]
+    ) -> list[str]:
+        """Derive FAQ themes from PAA and related searches."""
+        themes: list[str] = []
+        seen: set[str] = set()
+        source = list(paa_questions[:8]) + list(related_searches[:8])
+        for raw in source:
+            t = raw.strip().lower()
+            if not t:
+                continue
+            t = re.sub(
+                r"^(what|how|when|why|where|who|can|does|do|is|are)\s+",
+                "",
+                t,
+            )
+            t = re.sub(r"[?.,!]", "", t).strip()
+            if len(t) < 8:
+                continue
+            if t not in seen:
+                seen.add(t)
+                themes.append(t)
+        return themes[:10]
+
+    @staticmethod
+    def _infer_content_gaps(
+        keyword: str,
+        state: str,
+        competitor_headings: list[str],
+        paa_questions: list[str],
+    ) -> list[str]:
+        """Identify high-value subtopics likely missing from competitors.
+
+        This is heuristic by design: it favors practical subtopics that
+        improve usefulness and conversion for insurance settlement content.
+        """
+        corpus = " ".join(competitor_headings + paa_questions).lower()
+        kw = (keyword or "").lower()
+
+        candidates: list[tuple[str, tuple[str, ...]]] = []
+        if "total loss" in kw or "totaled" in kw:
+            candidates.extend([
+                ("ACV formula with worked example", ("actual cash value", "acv", "formula")),
+                ("Threshold math example (repair cost vs ACV)", ("threshold", "repair", "percent")),
+                ("Dispute workflow with scripts/checklist", ("dispute", "appeal", "negotiate")),
+                ("Required documents checklist", ("documents", "paperwork", "evidence")),
+                ("Settlement line-item breakdown", ("sales tax", "fees", "registration")),
+            ])
+        if "diminished value" in kw:
+            candidates.extend([
+                ("How diminished value is calculated", ("formula", "multiplier", "17c")),
+                ("Comparable vehicle evidence strategy", ("comparables", "comps", "listings")),
+                ("Negotiation timeline and escalation path", ("timeline", "escalation", "complaint")),
+            ])
+        if not candidates:
+            candidates.extend([
+                ("Step-by-step action plan", ("step", "checklist", "what to do")),
+                ("Common insurer tactics and counter-moves", ("mistakes", "lowball", "tactics")),
+                ("FAQ for edge cases", ("faq", "questions", "common questions")),
+            ])
+
+        # Encourage state-specific authority when a state is targeted.
+        if state:
+            candidates.append((
+                f"{state} DOI complaint and mediation path",
+                ("department of insurance", "doi", "complaint", "mediation"),
+            ))
+            candidates.append((
+                f"{state} statute citation section",
+                ("statute", "code", "§", state.lower()),
+            ))
+
+        gaps: list[str] = []
+        for label, hints in candidates:
+            if not any(h in corpus for h in hints):
+                gaps.append(label)
+        # De-dup while preserving order
+        out: list[str] = []
+        seen: set[str] = set()
+        for g in gaps:
+            if g not in seen:
+                seen.add(g)
+                out.append(g)
+        return out[:8]

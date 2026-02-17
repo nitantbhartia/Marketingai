@@ -18,6 +18,7 @@ from content_quality.validators.product_validator import ProductClaimValidator
 from content_quality.validators.state_validator import StateRegulationValidator
 from pipeline.agents.base import BaseAgent, RateLimitError
 from pipeline.db import ArticleStatus
+from pipeline.utils.factual_claims import evaluate_factual_claims
 from pipeline.utils.freshness import freshness_score as calc_freshness
 from pipeline.utils.readability import readability_report, word_count
 from pipeline.utils.seo import detect_faq_section, extract_links, score_seo
@@ -66,6 +67,12 @@ FLAGGED_PHRASES = [
 class SageAgent(BaseAgent):
     name = "sage"
     claim_field = "editor_claim"
+    CRITICAL_ISSUE_CODES = {
+        "LEGAL_COMPLIANCE_FLAGGED",
+        "PRODUCT_CLAIM_VIOLATION",
+        "STATE_ACCURACY_FAIL",
+        "FACT_UNSUPPORTED_CLAIM",
+    }
 
     def run(self) -> dict[str, Any]:
         """Auto-score articles in 'editor_review' status."""
@@ -298,6 +305,33 @@ class SageAgent(BaseAgent):
         total_score += fact_total
         all_issues.extend(all_fact_issues)
 
+        # 4d. Claim-level citation confidence gate (blocking, non-rubric)
+        claim_gate = evaluate_factual_claims(content)
+        claim_gate_issues: list[str] = []
+        if claim_gate.checks:
+            claim_gate_issues.append(
+                "Factual claim checklist: "
+                f"{claim_gate.verified} verified, "
+                f"{claim_gate.weak} weak, "
+                f"{claim_gate.unsupported} unsupported"
+            )
+            for c in claim_gate.checks[:12]:
+                if c.confidence == "unsupported":
+                    claim_gate_issues.append(
+                        f"[Unsupported {c.claim_type} claim] {c.claim} ({c.reason})"
+                    )
+                elif c.confidence == "weak":
+                    claim_gate_issues.append(
+                        f"[Weak {c.claim_type} claim] {c.claim} ({c.reason})"
+                    )
+        scores["factual_claims"] = {
+            "score": 0,
+            "max": 0,
+            "issues": claim_gate_issues,
+            "gate": True,
+        }
+        all_issues.extend(claim_gate_issues)
+
         # 5. Internal links (8 pts: 6 validity + 2 anchor text quality)
         link_score = 0.0
         link_issues = []
@@ -402,6 +436,7 @@ class SageAgent(BaseAgent):
             legal_score == 0
             or product_compliance == "FAIL"
             or state_accuracy == "FAIL"
+            or claim_gate.blocking
         )
         critical_reasons: list[str] = []
         if legal_score == 0:
@@ -410,6 +445,10 @@ class SageAgent(BaseAgent):
             critical_reasons.append("unauthorized product claims")
         if state_accuracy == "FAIL":
             critical_reasons.append("incorrect state regulation facts")
+        if claim_gate.blocking:
+            critical_reasons.append(
+                f"{claim_gate.unsupported} unsupported factual claim(s)"
+            )
 
         max_rounds = 2 if has_critical else self.config.pipeline.max_revision_rounds
 
@@ -1188,6 +1227,163 @@ Format each issue on its own line starting with "- "."""
         normalized = re.sub(r"\([\d.]+\)", "(N)", normalized)
         return normalized.strip()
 
+    @classmethod
+    def _issue_code_for(cls, category: str, issue: str) -> str:
+        """Map a human issue string to a stable machine-readable code."""
+        text = (issue or "").lower()
+        cat = (category or "").lower()
+
+        if text.startswith("[state accuracy]"):
+            return "STATE_ACCURACY_FAIL"
+        if text.startswith("[product compliance]"):
+            return "PRODUCT_CLAIM_VIOLATION"
+
+        if "keyword not in first 100 words" in text:
+            return "SEO_KEYWORD_OPENING"
+        if "keyword in only 1 h2" in text or "keyword not in any h2" in text:
+            return "SEO_H2_KEYWORD_COVERAGE"
+        if "keyword density too low" in text or "keyword stuffing" in text:
+            return "SEO_KEYWORD_DENSITY"
+        if "no faq section" in text:
+            return "SEO_FAQ_MISSING"
+        if "no meta description" in text:
+            return "SEO_META_MISSING"
+        if "meta description length" in text:
+            return "SEO_META_LENGTH"
+        if "keyword not in meta description" in text:
+            return "SEO_META_NO_KEYWORD"
+        if "no external links" in text or ("only" in text and "external links" in text):
+            return "LINKS_EXTERNAL_MISSING"
+        if "heading hierarchy skip" in text:
+            return "SEO_HEADING_HIERARCHY"
+        if "[freshness]" in text:
+            return "SEO_FRESHNESS_STALE"
+
+        if "no internal links" in text or ("only" in text and "internal links" in text):
+            return "LINKS_INTERNAL_MISSING"
+        if "generic anchor text" in text:
+            return "LINKS_ANCHOR_GENERIC"
+        if "unpublished articles" in text:
+            return "LINKS_TO_UNPUBLISHED"
+
+        if "word count" in text:
+            return "WORD_COUNT_OUT_OF_RANGE"
+
+        if "no mention of claimcoach" in text:
+            return "CTA_MISSING"
+        if "mentioned but no link to claimcoach.app" in text:
+            return "CTA_LINK_MISSING"
+        if "no cta in first 300 words" in text:
+            return "CTA_EARLY_MISSING"
+        if "only" in text and "cta" in text:
+            return "CTA_COUNT_LOW"
+        if "benefit copy" in text:
+            return "CTA_BENEFIT_COPY_WEAK"
+
+        if text.startswith("[unsupported"):
+            return "FACT_UNSUPPORTED_CLAIM"
+        if text.startswith("[weak"):
+            return "FACT_WEAK_CLAIM"
+        if "factual claim checklist" in text:
+            return "FACT_CLAIM_CHECKLIST"
+        if text.startswith("factual error:") or text.startswith("ai fact check:"):
+            return "FACTUAL_ERROR"
+        if text.startswith("[math error]"):
+            return "FACT_MATH_ERROR"
+        if "truncated sentence" in text:
+            return "FACT_TRUNCATED_SENTENCE"
+        if "leaked metadata in body" in text:
+            return "FACT_METADATA_LEAK"
+
+        if "flesch-kincaid score" in text:
+            return "READABILITY_LOW"
+        if "average sentence length" in text:
+            return "READABILITY_SENTENCE_LENGTH"
+        if "average paragraph length" in text:
+            return "READABILITY_PARAGRAPH_LENGTH"
+        if "passive voice" in text:
+            return "READABILITY_PASSIVE_VOICE"
+        if "transition words in only" in text:
+            return "READABILITY_TRANSITIONS_LOW"
+        if "low sentence length variety" in text:
+            return "READABILITY_VARIETY_LOW"
+        if "complex word density" in text:
+            return "READABILITY_COMPLEX_WORDS"
+
+        if "flagged phrase:" in text:
+            return "LEGAL_COMPLIANCE_FLAGGED"
+
+        if (
+            "no image placeholders" in text
+            or "no images in article" in text
+            or ("only" in text and "image" in text)
+        ):
+            return "MEDIA_IMAGE_MISSING"
+        if "missing alt text" in text or "short alt text" in text:
+            return "MEDIA_ALT_TEXT_WEAK"
+        if "low scanability" in text:
+            return "MEDIA_SCANABILITY_LOW"
+        if "no article json-ld schema" in text:
+            return "SCHEMA_ARTICLE_MISSING"
+        if "no faqpage json-ld schema" in text or "no faq section or faqpage schema" in text:
+            return "SCHEMA_FAQ_MISSING"
+        if "json-ld schema is malformed" in text:
+            return "SCHEMA_JSONLD_INVALID"
+        if "no blockquote callouts" in text:
+            return "MEDIA_CALLOUTS_MISSING"
+
+        if "no interactive tool embedded" in text:
+            return "INTERACTIVE_TOOL_MISSING"
+
+        if cat == "plagiarism":
+            return "PLAGIARISM_RISK"
+        return "GENERIC_FIX_REQUIRED"
+
+    @classmethod
+    def _severity_for_code(cls, code: str) -> str:
+        if code in cls.CRITICAL_ISSUE_CODES:
+            return "critical"
+        if code.startswith("READABILITY_") or code.startswith("FACT") or code.startswith("LEGAL_"):
+            return "major"
+        return "minor"
+
+    def _build_structured_issue_payload(self, scores: dict, issues: list[str]) -> dict[str, Any]:
+        """Build machine-readable issue payload for deterministic Quill revisions."""
+        structured: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        for category, data in scores.items():
+            for issue in data.get("issues", []):
+                code = self._issue_code_for(category, issue)
+                key = (code, issue.lower().strip())
+                if key in seen:
+                    continue
+                seen.add(key)
+                structured.append({
+                    "code": code,
+                    "category": category,
+                    "severity": self._severity_for_code(code),
+                    "issue": issue,
+                })
+
+        for issue in issues:
+            code = self._issue_code_for("global", issue)
+            key = (code, issue.lower().strip())
+            if key in seen:
+                continue
+            seen.add(key)
+            structured.append({
+                "code": code,
+                "category": "global",
+                "severity": self._severity_for_code(code),
+                "issue": issue,
+            })
+
+        return {
+            "version": "1.0",
+            "issues": structured[:30],
+        }
+
     def _format_review(
         self,
         scores: dict,
@@ -1211,6 +1407,16 @@ Format each issue on its own line starting with "- "."""
             lines.append("### Issues to Fix:")
             for issue in issues:
                 lines.append(f"- {issue}")
+
+        payload = self._build_structured_issue_payload(scores, issues)
+        if payload["issues"]:
+            lines.extend([
+                "",
+                "### Structured Issues JSON:",
+                "```json",
+                json.dumps(payload, ensure_ascii=True, indent=2),
+                "```",
+            ])
 
         return "\n".join(lines)
 

@@ -16,6 +16,7 @@ from jinja2 import Template
 
 from pipeline.agents.base import BaseAgent
 from pipeline.db import ArticleStatus
+from pipeline.utils.factual_claims import evaluate_factual_claims
 from pipeline.utils.images import ImageResolver
 
 
@@ -143,6 +144,34 @@ class EzraAgent(BaseAgent):
                 "article_id": article_id,
                 "success": False,
                 "error": "Article has no title",
+            }
+
+        # Hard factual gate: do not publish when unsupported factual claims
+        # (numeric/legal/timeline) are missing source citations.
+        claim_gate = evaluate_factual_claims(article.markdown_content or "")
+        if claim_gate.blocking:
+            unsupported_examples = [
+                f"- [{c.claim_type}] {c.claim[:180]}"
+                for c in claim_gate.checks
+                if c.confidence == "unsupported"
+            ][:8]
+            note = (
+                "[EZRA FACTUAL GATE] Publish blocked: "
+                f"{claim_gate.unsupported} unsupported factual claim(s). "
+                "Add source citations for numeric, legal, and timeline claims.\n"
+                + "\n".join(unsupported_examples)
+            )
+            self.db.update_article(
+                article_id,
+                publisher_claim="",
+                status=ArticleStatus.REVISION.value,
+                revision_notes=(article.revision_notes or "") + "\n\n" + note,
+                validation_status="FAIL",
+            )
+            return {
+                "article_id": article_id,
+                "success": False,
+                "error": f"Factual gate failed ({claim_gate.unsupported} unsupported claims)",
             }
 
         self.logger.info(f"Publishing: {article.title}")
