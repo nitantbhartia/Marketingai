@@ -10,7 +10,7 @@ import threading
 import traceback
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -24,6 +24,19 @@ from content_quality.config import DATABASE_PATH, API_PORT
 
 # In-memory background job store
 _jobs: Dict[str, Dict[str, Any]] = {}
+
+
+def _daily_promote_remaining(cfg, db) -> tuple[int, int, int]:
+    """Return (daily_cap, promoted_today, remaining) for backlog->todo promotions."""
+    daily_cap = max(1, int(getattr(cfg.pipeline, "daily_promote_cap", 8)))
+    start_of_day = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).isoformat()
+    promoted_today = len(
+        db.get_metrics(name="promote_to_todo", since=start_of_day, limit=5000)
+    )
+    remaining = max(0, daily_cap - promoted_today)
+    return daily_cap, promoted_today, remaining
 
 
 @asynccontextmanager
@@ -55,13 +68,21 @@ recent_notifications = []
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
+async def dashboard(request: Request, status: Optional[str] = None):
     """Main dashboard showing all articles in review."""
 
     try:
+        allowed_statuses = [
+            "editor_review", "review", "ready_to_publish", "revision",
+            "rejected", "todo", "in_progress", "done", "amplified",
+        ]
+        status_filter = None
+        if status and status in allowed_statuses:
+            status_filter = status
+
         # Get articles needing review
         with get_db() as db:
-            cursor = db.execute("""
+            base_query = """
                 SELECT id, title, slug, target_keyword, target_state,
                        status, sage_score, seo_score, readability_score,
                        validation_status, validation_notes,
@@ -70,6 +91,13 @@ async def dashboard(request: Request):
                 FROM articles
                 WHERE status IN ('editor_review', 'review', 'ready_to_publish', 'revision',
                                  'rejected', 'todo', 'in_progress', 'done', 'amplified')
+            """
+            params: tuple = ()
+            if status_filter:
+                base_query += " AND status = ?"
+                params = (status_filter,)
+
+            base_query += """
                 ORDER BY
                     CASE status
                         WHEN 'in_progress' THEN 1
@@ -83,7 +111,8 @@ async def dashboard(request: Request):
                         WHEN 'amplified' THEN 9
                     END,
                     updated_at DESC
-            """)
+            """
+            cursor = db.execute(base_query, params)
             articles = [dict(row) for row in cursor.fetchall()]
 
         # Get summary stats
@@ -122,6 +151,7 @@ async def dashboard(request: Request):
             "request": request,
             "articles": articles,
             "status_counts": status_counts,
+            "status_filter": status_filter or "all",
             "approval_threshold": approval_threshold,
             "max_revision_rounds": max_revision_rounds,
             "rate_limit_count": rate_limit_count,
@@ -459,7 +489,7 @@ async def get_stats():
                 AVG(readability_score) as avg_readability,
                 COUNT(*) as total_reviewed
             FROM articles
-            WHERE validation_status IS NOT NULL
+            WHERE validation_status IN ('PASS', 'FAIL', 'pass', 'fail')
         """)
         row = cursor.fetchone()
         scores = {
@@ -573,21 +603,42 @@ async def trigger_promote():
         cfg = Config.load()
         db = Database(cfg.resolve_path(cfg.pipeline.database_path))
 
+        daily_cap, promoted_today, remaining = _daily_promote_remaining(cfg, db)
+        if remaining <= 0:
+            return {
+                "status": "done",
+                "promoted": 0,
+                "articles": [],
+                "daily_cap": daily_cap,
+                "promoted_today": promoted_today,
+                "remaining": 0,
+                "message": "Daily promote cap reached",
+            }
+
         backlog = db.query_articles(
             status=ArticleStatus.BACKLOG.value,
-            limit=10,
-            order_by="commercial_intent DESC, keyword_difficulty ASC",
+            limit=min(10, remaining),
+            order_by=(
+                "commercial_intent DESC, "
+                "search_volume DESC, "
+                "keyword_difficulty ASC, "
+                "created_at ASC"
+            ),
         )
 
         promoted = []
         for article in backlog:
             db.update_article(article.id, status=ArticleStatus.TODO.value)
+            db.record_metric("promote_to_todo", 1, str(article.id))
             promoted.append({"id": article.id, "keyword": article.target_keyword})
 
         return {
             "status": "done",
             "promoted": len(promoted),
             "articles": promoted,
+            "daily_cap": daily_cap,
+            "promoted_today": promoted_today,
+            "remaining": max(0, remaining - len(promoted)),
         }
     except Exception as e:
         return {
@@ -608,10 +659,11 @@ def _auto_promote_for_quill(cfg, db):
         logger.info(f"Quill pre-check: {todo_count} todo articles available")
         return
 
-    # Also check for stuck in_progress articles and reset them
-    in_progress = db.query_articles(status=ArticleStatus.IN_PROGRESS.value, limit=50)
-    for article in in_progress:
-        logger.info(f"Resetting stuck article {article.id} back to todo")
+    # Reset only stale in_progress articles (avoid stealing active work).
+    stale = db.get_stuck_articles(hours=3)
+    stale_in_progress = [a for a in stale if a.status == ArticleStatus.IN_PROGRESS.value]
+    for article in stale_in_progress:
+        logger.info(f"Resetting stale in_progress article {article.id} back to todo")
         db.update_article(article.id, status=ArticleStatus.TODO.value, writer_claim="")
 
     todo_count = db.count_articles(status=ArticleStatus.TODO.value)
@@ -619,14 +671,30 @@ def _auto_promote_for_quill(cfg, db):
         logger.info(f"Recovered {todo_count} stuck articles to todo")
         return
 
+    # Respect daily promote cap before auto-promoting from backlog.
+    daily_cap, promoted_today, remaining = _daily_promote_remaining(cfg, db)
+    if remaining <= 0:
+        logger.info(
+            "Daily promote cap reached (%s/%s); skipping auto-promote",
+            promoted_today,
+            daily_cap,
+        )
+        return
+
     # Auto-promote from backlog
     backlog = db.query_articles(
         status=ArticleStatus.BACKLOG.value,
-        limit=3,
-        order_by="commercial_intent DESC, keyword_difficulty ASC",
+        limit=min(3, remaining),
+        order_by=(
+            "commercial_intent DESC, "
+            "search_volume DESC, "
+            "keyword_difficulty ASC, "
+            "created_at ASC"
+        ),
     )
     for article in backlog:
         db.update_article(article.id, status=ArticleStatus.TODO.value)
+        db.record_metric("promote_to_todo", 1, str(article.id))
         logger.info(f"Auto-promoted article {article.id}: {article.target_keyword}")
 
     if not backlog:
@@ -1055,4 +1123,3 @@ if __name__ == "__main__":
         port=port,
         log_level="info"
     )
-

@@ -241,10 +241,10 @@
                             <div class="score-item">
                                 <div class="score-label">SEO</div>
                                 <div class="score-bar">
-                                    <div class="score-fill score-{{ 'excellent' if article.seo_score and article.seo_score >= 16 else 'good' if article.seo_score and article.seo_score >= 12 else 'needs-work' }}"
-                                         style="width: {{ ((article.seo_score or 0) / 20 * 100)|int }}%"></div>
+                                    <div class="score-fill score-{{ 'excellent' if article.seo_score and article.seo_score >= 14 else 'good' if article.seo_score and article.seo_score >= 11 else 'needs-work' }}"
+                                         style="width: {{ ((article.seo_score or 0) / 18 * 100)|int }}%"></div>
                                 </div>
-                                <div class="score-value">{{ article.seo_score or 'N/A' }}/20</div>
+                                <div class="score-value">{{ article.seo_score or 'N/A' }}/18</div>
                             </div>
 
                             <div class="score-item">
@@ -260,8 +260,8 @@
 
                         {% if article.validation_status %}
                         <div class="article-validation">
-                            <span class="validation-{{ 'pass' if article.validation_status == 'PASS' else 'fail' }}">
-                                {{ 'Passed' if article.validation_status == 'PASS' else 'Failed' }} Validation
+                            <span class="validation-{{ 'pass' if article.validation_status|upper == 'PASS' else 'fail' }}">
+                                {{ 'Passed' if article.validation_status|upper == 'PASS' else 'Failed' }} Validation
                             </span>
                         </div>
                         {% endif %}

@@ -60,14 +60,14 @@ def score_seo(
     else:
         issues.append("Keyword not in first 100 words")
 
-    # Keyword in H2 headers (3 pts - need at least 2)
+    # Keyword in H2 headers (2 pts - need at least 2)
     h2_pattern = re.compile(r"^##\s+(.+)$", re.MULTILINE)
     h2s = h2_pattern.findall(content)
     h2_keyword_count = sum(1 for h in h2s if _keyword_match(keyword, h))
     if h2_keyword_count >= 2:
-        score += 3
+        score += 2
     elif h2_keyword_count == 1:
-        score += 1.5
+        score += 1
         issues.append("Keyword in only 1 H2 header (need 2+)")
     else:
         issues.append("Keyword not in any H2 headers")
@@ -110,9 +110,9 @@ def score_seo(
     else:
         issues.append("No external links")
 
-    # FAQ section (3 pts)
+    # FAQ section (2 pts)
     if has_faq:
-        score += 3
+        score += 2
     else:
         issues.append("No FAQ section")
 

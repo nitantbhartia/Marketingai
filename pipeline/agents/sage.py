@@ -460,7 +460,7 @@ class SageAgent(BaseAgent):
             "readability_score": read_report["flesch_kincaid"],
             "word_count": wc,
             "editor_claim": "",  # Always release Sage's claim after decision
-            "validation_status": "pass" if decision == "approved" else "fail",
+            "validation_status": "PASS" if decision == "approved" else "FAIL",
             "validation_notes": revision_notes,
             "state_accuracy": state_accuracy,
             "product_compliance": product_compliance,

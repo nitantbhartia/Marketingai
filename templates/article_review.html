@@ -238,14 +238,14 @@
                         <div class="score-detail">
                             <div class="score-header">
                                 <span class="score-label">SEO Score</span>
-                                <span class="score-number score-{{ 'excellent' if article.seo_score and article.seo_score >= 16 else 'good' if article.seo_score and article.seo_score >= 12 else 'needs-work' }}">
-                                    {{ article.seo_score or 'N/A' }}/20
+                                <span class="score-number score-{{ 'excellent' if article.seo_score and article.seo_score >= 14 else 'good' if article.seo_score and article.seo_score >= 11 else 'needs-work' }}">
+                                    {{ article.seo_score or 'N/A' }}/18
                                 </span>
                             </div>
                             {% if article.seo_score %}
                             <div class="score-bar-large">
-                                <div class="score-fill-large score-{{ 'excellent' if article.seo_score >= 16 else 'good' if article.seo_score >= 12 else 'needs-work' }}"
-                                     style="width: {{ (article.seo_score / 20 * 100)|int }}%"></div>
+                                <div class="score-fill-large score-{{ 'excellent' if article.seo_score >= 14 else 'good' if article.seo_score >= 11 else 'needs-work' }}"
+                                     style="width: {{ (article.seo_score / 18 * 100)|int }}%"></div>
                             </div>
                             {% endif %}
                         </div>
