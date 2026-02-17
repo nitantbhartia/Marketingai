@@ -110,8 +110,8 @@ class TwitterConfig:
 @dataclass
 class PipelineSettings:
     database_path: str = "pipeline.db"
-    product_context_path: str = "PRODUCT_CONTEXT.md"
-    state_rules_path: str = "STATE_RULES.md"
+    product_context_path: str = "reference/PRODUCT_CONTEXT.md"
+    state_rules_path: str = "reference/STATE_RULES.md"
     blog_output_dir: str = "output/blog"
     min_backlog_topics: int = 15
     articles_per_week_target: int = 7
@@ -119,6 +119,10 @@ class PipelineSettings:
     max_revision_rounds: int = 5
     approval_score_threshold: int = 80
     dashboard_url: str = ""
+    # Cost-control switches
+    quill_use_strategy_on_high_trust_only: bool = True
+    quill_enable_contrastive_critique: bool = False
+    sage_deep_fact_check_on_high_trust_only: bool = True
 
 
 @dataclass
@@ -136,6 +140,30 @@ class ScheduleConfig:
 
 
 @dataclass
+class AtlasConfig:
+    enabled: bool = True
+    min_articles_for_analysis: int = 10
+    min_confidence_score: float = 0.7
+
+
+@dataclass
+class RivalConfig:
+    enabled: bool = True
+    competitor_domains: list[str] = field(default_factory=list)
+    target_keywords: list[str] = field(default_factory=list)
+    max_competitor_checks: int = 20
+
+
+@dataclass
+class RemixConfig:
+    enabled: bool = True
+    remix_types: list[str] = field(
+        default_factory=lambda: ["twitter", "linkedin", "email", "youtube"]
+    )
+    max_remixes_per_run: int = 3
+
+
+@dataclass
 class Config:
     anthropic: AnthropicConfig = field(default_factory=AnthropicConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
@@ -147,6 +175,9 @@ class Config:
     twitter: TwitterConfig = field(default_factory=TwitterConfig)
     pipeline: PipelineSettings = field(default_factory=PipelineSettings)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
+    atlas: AtlasConfig = field(default_factory=AtlasConfig)
+    rival: RivalConfig = field(default_factory=RivalConfig)
+    remix: RemixConfig = field(default_factory=RemixConfig)
     # Which LLM provider to use: "anthropic" or "gemini"
     llm_provider: str = "anthropic"
     # Per-agent provider overrides: e.g. {"sage": "anthropic"} to use a
@@ -237,6 +268,9 @@ class Config:
             "twitter": self.twitter,
             "pipeline": self.pipeline,
             "schedule": self.schedule,
+            "atlas": self.atlas,
+            "rival": self.rival,
+            "remix": self.remix,
         }
         if "llm_provider" in raw:
             self.llm_provider = raw["llm_provider"]

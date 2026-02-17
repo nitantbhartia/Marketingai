@@ -46,6 +46,13 @@ def _build_simple_config(config: Config) -> dict[str, Any]:
         "anthropic_api_key": config.anthropic.api_key,
         "blog_output_dir": config.blog.output_dir,
         "site_url": config.blog.site_url,
+        "min_articles_for_analysis": config.atlas.min_articles_for_analysis,
+        "min_confidence_score": config.atlas.min_confidence_score,
+        "competitor_domains": config.rival.competitor_domains,
+        "target_keywords": config.rival.target_keywords,
+        "max_competitor_checks": config.rival.max_competitor_checks,
+        "remix_types": config.remix.remix_types,
+        "max_remixes_per_run": config.remix.max_remixes_per_run,
     }
 
 
@@ -54,16 +61,19 @@ def _run_simple_agent(agent_name: str, config: Config) -> dict[str, Any]:
     config_dict = _build_simple_config(config)
 
     if agent_name == "atlas":
+        if not config.atlas.enabled:
+            return {"status": "skipped", "reason": "atlas_disabled"}
         from pipeline.agents.atlas import Atlas
         agent = Atlas(config_dict)
     elif agent_name == "rival":
+        if not config.rival.enabled:
+            return {"status": "skipped", "reason": "rival_disabled"}
         from pipeline.agents.rival import Rival
-        config_dict["competitor_domains"] = getattr(config, "competitor_domains", [])
-        config_dict["target_keywords"] = getattr(config, "target_keywords", [])
         agent = Rival(config_dict)
     elif agent_name == "remix":
+        if not config.remix.enabled:
+            return {"status": "skipped", "reason": "remix_disabled"}
         from pipeline.agents.remix import Remix
-        config_dict["remix_types"] = ["twitter", "linkedin", "email", "youtube"]
         agent = Remix(config_dict)
     else:
         raise ValueError(f"Unknown simple agent: {agent_name}")

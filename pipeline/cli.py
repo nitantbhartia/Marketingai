@@ -36,19 +36,29 @@ def _run_simple_agent(agent_name: str, cfg: Config) -> dict:
         "anthropic_api_key": cfg.anthropic.api_key,
         "blog_output_dir": cfg.blog.output_dir,
         "site_url": cfg.blog.site_url,
+        "min_articles_for_analysis": cfg.atlas.min_articles_for_analysis,
+        "min_confidence_score": cfg.atlas.min_confidence_score,
+        "competitor_domains": cfg.rival.competitor_domains,
+        "target_keywords": cfg.rival.target_keywords,
+        "max_competitor_checks": cfg.rival.max_competitor_checks,
+        "remix_types": cfg.remix.remix_types,
+        "max_remixes_per_run": cfg.remix.max_remixes_per_run,
     }
 
     if agent_name == "atlas":
+        if not cfg.atlas.enabled:
+            return {"status": "skipped", "reason": "atlas_disabled"}
         from pipeline.agents.atlas import Atlas
         agent = Atlas(config_dict)
     elif agent_name == "rival":
+        if not cfg.rival.enabled:
+            return {"status": "skipped", "reason": "rival_disabled"}
         from pipeline.agents.rival import Rival
-        config_dict["competitor_domains"] = getattr(cfg, "competitor_domains", [])
-        config_dict["target_keywords"] = getattr(cfg, "target_keywords", [])
         agent = Rival(config_dict)
     elif agent_name == "remix":
+        if not cfg.remix.enabled:
+            return {"status": "skipped", "reason": "remix_disabled"}
         from pipeline.agents.remix import Remix
-        config_dict["remix_types"] = ["twitter", "linkedin", "email", "youtube"]
         agent = Remix(config_dict)
     else:
         return {"status": "error", "error": f"Unknown agent: {agent_name}"}
@@ -92,12 +102,6 @@ def run(ctx, agent_name):
         click.echo(json.dumps(result, indent=2, default=str))
     elif agent_name == "all":
         results = run_all_agents(cfg, db)
-        # Also run new agents
-        for name in ["atlas", "rival", "remix"]:
-            try:
-                results[name] = _run_simple_agent(name, cfg)
-            except Exception as e:
-                results[name] = {"status": "error", "error": str(e)}
         for name, result in results.items():
             status = result.get("status", "unknown")
             click.echo(f"  {name}: {status}")

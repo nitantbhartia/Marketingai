@@ -153,9 +153,8 @@ class BaseAgent(ABC):
             return getattr(
                 self.config.gemini, "strategy_model", "gemini-2.5-pro"
             )
-        return getattr(
-            self.config.anthropic, "quill_model", "claude-sonnet-4-5-20250929"
-        )
+        # Use each Anthropic agent's configured model (e.g. sage_model for Sage)
+        return self.default_model
 
     @property
     def utility_model(self) -> str:

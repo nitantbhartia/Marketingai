@@ -344,7 +344,13 @@ class QuillAgent(BaseAgent):
             return self._write_one_inner(article, article_id, is_revision)
         except RateLimitError as e:
             logger.warning(f"Rate limited during pre-draft of article {article_id}: {e}")
-            self.db.update_article(article_id, writer_claim="")
+            rollback_status = (
+                ArticleStatus.REVISION.value if is_revision
+                else ArticleStatus.TODO.value
+            )
+            self.db.update_article(
+                article_id, status=rollback_status, writer_claim=""
+            )
             self.db.record_metric("rate_limit", 0, json.dumps({
                 "agent": "quill", "article_id": article_id, "phase": "pre_draft",
             }))
@@ -378,7 +384,13 @@ class QuillAgent(BaseAgent):
                 )
             except RateLimitError as e:
                 logger.warning(f"Rate limited during targeted revision of article {article_id}: {e}")
-                self.db.update_article(article_id, writer_claim="")
+                rollback_status = (
+                    ArticleStatus.REVISION.value if is_revision
+                    else ArticleStatus.TODO.value
+                )
+                self.db.update_article(
+                    article_id, status=rollback_status, writer_claim=""
+                )
                 self.db.record_metric("rate_limit", 0, json.dumps({
                     "agent": "quill", "article_id": article_id, "phase": "targeted_revision",
                 }))
@@ -386,6 +398,12 @@ class QuillAgent(BaseAgent):
             if result:
                 return result
             # Fall through to full rewrite if targeted revision fails
+
+        outline_model = (
+            self.strategy_model
+            if self._use_strategy_model_for_article(article, is_revision=is_revision)
+            else self.fast_model
+        )
 
         # ── Phase 0: Entity mapping (E-E-A-T knowledge graph) ──
         entity_map = self._extract_entities(article)
@@ -403,6 +421,7 @@ class QuillAgent(BaseAgent):
             revision_feedback=article.revision_notes if is_revision else "",
             serp_context=serp_context,
             nhtsa_context=nhtsa_context,
+            model_name=outline_model,
         )
 
         # ── Phase 2: Write article (section-by-section from outline) ──
@@ -412,12 +431,14 @@ class QuillAgent(BaseAgent):
                 internal_links_context, is_revision, lessons,
             )
         except RateLimitError as e:
-            # Rate limit — release claim but DON'T change article status.
-            # The article stays in its current status (IN_PROGRESS) and will
-            # be picked up again on the next scheduler run once the rate
-            # limit window resets.
             logger.warning(f"Rate limited during draft of article {article_id}: {e}")
-            self.db.update_article(article_id, writer_claim="")
+            rollback_status = (
+                ArticleStatus.REVISION.value if is_revision
+                else ArticleStatus.TODO.value
+            )
+            self.db.update_article(
+                article_id, status=rollback_status, writer_claim=""
+            )
             self.db.record_metric("rate_limit", 0, json.dumps({
                 "agent": "quill", "article_id": article_id, "phase": "draft",
             }))
@@ -438,7 +459,8 @@ class QuillAgent(BaseAgent):
             title = article.suggested_title or article.title or article.target_keyword.title()
 
             # ── Phase 2.5: Contrastive critique (anti-AI-laziness) ──
-            content = self._contrastive_critique(content, article)
+            if getattr(self.config.pipeline, "quill_enable_contrastive_critique", False):
+                content = self._contrastive_critique(content, article)
 
             # ── Phase 3: Self-review & auto-fix ──
             content, meta_description, fixes = self._self_review_and_fix(
@@ -499,7 +521,13 @@ class QuillAgent(BaseAgent):
             self.db.update_article(article_id, **update_kwargs)
         except RateLimitError as e:
             logger.warning(f"Rate limited during post-draft of article {article_id}: {e}")
-            self.db.update_article(article_id, writer_claim="")
+            rollback_status = (
+                ArticleStatus.REVISION.value if is_revision
+                else ArticleStatus.TODO.value
+            )
+            self.db.update_article(
+                article_id, status=rollback_status, writer_claim=""
+            )
             self.db.record_metric("rate_limit", 0, json.dumps({
                 "agent": "quill", "article_id": article_id, "phase": "post_draft",
             }))
@@ -536,6 +564,29 @@ class QuillAgent(BaseAgent):
             "is_revision": is_revision,
             "self_review_fixes": fixes,
         }
+
+    def _is_high_trust_article(self, article, is_revision: bool = False) -> bool:
+        """Identify content that warrants higher-cost reasoning models."""
+        if is_revision or getattr(article, "revision_count", 0) > 0:
+            return True
+        if getattr(article, "target_state", ""):
+            return True
+        if (getattr(article, "content_category", "") or "") in {
+            "state_specific",
+            "comparison",
+        }:
+            return True
+        return False
+
+    def _use_strategy_model_for_article(
+        self, article, is_revision: bool = False
+    ) -> bool:
+        """Gate expensive strategy model calls for cost control."""
+        if not getattr(
+            self.config.pipeline, "quill_use_strategy_on_high_trust_only", True
+        ):
+            return True
+        return self._is_high_trust_article(article, is_revision=is_revision)
 
     # ------------------------------------------------------------------
     # Phase 0: Entity mapping (E-E-A-T knowledge graph)
@@ -668,6 +719,7 @@ SOURCES: source1, source2, source3"""
         revision_feedback: str = "",
         serp_context: str = "",
         nhtsa_context: str = "",
+        model_name: str | None = None,
     ) -> str:
         """Generate a structured outline before writing.
 
@@ -743,7 +795,7 @@ Format as a clean outline with ## headers and bullet points."""
             outline = self.call_claude(
                 prompt=prompt,
                 system="You are a content strategist creating detailed article outlines.",
-                model=self.strategy_model,
+                model=model_name or self.strategy_model,
                 max_tokens=1500,
             )
             logger.info(
@@ -1967,7 +2019,11 @@ Article:
                 result = self.call_claude(
                     prompt=edit_prompt,
                     system=self._build_system_prompt(article.content_category),
-                    model=self.default_model,
+                    model=(
+                        self.strategy_model
+                        if self._is_high_trust_article(article, is_revision=True)
+                        else self.fast_model
+                    ),
                     max_tokens=8192,
                 )
                 content, new_meta = self._parse_result(result)

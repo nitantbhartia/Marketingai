@@ -55,14 +55,17 @@ openai:
 # Pipeline settings
 pipeline:
   database_path: "pipeline.db"
-  product_context_path: "PRODUCT_CONTEXT.md"
-  state_rules_path: "STATE_RULES.md"
+  product_context_path: "reference/PRODUCT_CONTEXT.md"
+  state_rules_path: "reference/STATE_RULES.md"
   blog_output_dir: "output/blog"
   min_backlog_topics: 15
   articles_per_week_target: 4
   max_revision_rounds: 5
   approval_score_threshold: 80
   dashboard_url: "http://localhost:8000"  # Review dashboard URL (set to empty to disable notifications)
+  quill_use_strategy_on_high_trust_only: true
+  quill_enable_contrastive_critique: false
+  sage_deep_fact_check_on_high_trust_only: true
 
 # New agents (NextLevel features)
 atlas:

@@ -280,7 +280,12 @@ class SageAgent(BaseAgent):
 
         # 4. Factual + Math accuracy (18 pts)
         # 4a. Factual claims (15 pts from AI/regex)
-        fact_score, fact_issues = self._check_facts(content, article)
+        deep_fact_check = self._should_run_deep_fact_check(
+            article, content, pre_fact_score=total_score
+        )
+        fact_score, fact_issues = self._check_facts(
+            content, article, deep_check=deep_fact_check
+        )
         # Scale: _check_facts returns 0-20, normalize to 0-15
         fact_score = round(min(fact_score, 20.0) * 15 / 20, 1)
         # 4b. Math accuracy (3 pts from MathValidator)
@@ -622,7 +627,37 @@ Article excerpt:
         # Couldn't parse — give benefit of the doubt
         return 18.0, ["Plagiarism score reused (prior result not found, defaulting to 18/20)"]
 
-    def _check_facts(self, content: str, article) -> tuple[float, list[str]]:
+    def _should_run_deep_fact_check(
+        self, article, content: str, pre_fact_score: float
+    ) -> bool:
+        """Decide when to spend premium LLM calls on deep fact checking."""
+        if not self.has_llm:
+            return False
+
+        if not getattr(
+            self.config.pipeline, "sage_deep_fact_check_on_high_trust_only", True
+        ):
+            return True
+
+        if article.target_state or article.revision_count > 0:
+            return True
+
+        # If article could still pass after remaining categories, run deep check.
+        max_remaining_after_facts = 32.0
+        threshold = float(self.config.pipeline.approval_score_threshold)
+        if pre_fact_score + max_remaining_after_facts >= (threshold - 2):
+            return True
+
+        # Legal/statute language is sensitive even for non-state content.
+        content_lower = content.lower()
+        if re.search(r"\b(?:under|according to|pursuant to|stat\.|code|§)\b", content_lower):
+            return True
+
+        return False
+
+    def _check_facts(
+        self, content: str, article, deep_check: bool = True
+    ) -> tuple[float, list[str]]:
         """Check factual accuracy against product context and state rules."""
         issues = []
         score = 20.0
@@ -658,7 +693,7 @@ Article excerpt:
                 score -= 5
 
         # If AI is available, do a deeper fact check
-        if self.has_llm:
+        if self.has_llm and deep_check:
             try:
                 ai_issues = self._ai_fact_check(content, article)
                 issues.extend(ai_issues)
@@ -667,6 +702,12 @@ Article excerpt:
                 raise  # Let rate limits propagate — don't skip fact check
             except Exception as e:
                 logger.warning(f"AI fact check failed: {e}")
+        elif self.has_llm and not deep_check:
+            # Cost-optimized mode: skip premium deep check when risk is low.
+            score = min(score, 17.0)
+            issues.append(
+                "Deep AI fact check skipped by cost policy (low-risk/non-borderline article)"
+            )
         else:
             # Without AI verification, cap at 16/20 to reflect the uncertainty.
             # Regex patterns catch ~17 known-bad claim patterns; if none fire
