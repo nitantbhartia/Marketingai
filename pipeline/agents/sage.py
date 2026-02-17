@@ -335,6 +335,16 @@ class SageAgent(BaseAgent):
         }
         all_issues.extend(claim_gate_issues)
 
+        # 4e. Hard publish-block integrity gate (blocking, non-rubric)
+        hard_block_issues = self._check_hard_publish_blocks(content)
+        scores["hard_blockers"] = {
+            "score": 0,
+            "max": 0,
+            "issues": hard_block_issues,
+            "gate": True,
+        }
+        all_issues.extend(hard_block_issues)
+
         # 5. Internal links (8 pts: 6 validity + 2 anchor text quality)
         link_score = 0.0
         link_issues = []
@@ -440,6 +450,7 @@ class SageAgent(BaseAgent):
             or product_compliance == "FAIL"
             or state_accuracy == "FAIL"
             or claim_gate.blocking
+            or bool(hard_block_issues)
         )
         critical_reasons: list[str] = []
         if legal_score == 0:
@@ -452,6 +463,8 @@ class SageAgent(BaseAgent):
             critical_reasons.append(
                 f"{claim_gate.unsupported} unsupported factual claim(s)"
             )
+        if hard_block_issues:
+            critical_reasons.append("hard publish blockers detected")
 
         max_rounds = 2 if has_critical else self.config.pipeline.max_revision_rounds
 
@@ -1140,6 +1153,48 @@ Format each issue on its own line starting with "- "."""
 
         return min(penalty, 5.0), issues
 
+    @staticmethod
+    def _check_hard_publish_blocks(content: str) -> list[str]:
+        """Detect severe structural/template corruption that blocks publishing."""
+        issues: list[str] = []
+        text = content or ""
+        lower = text.lower()
+
+        # Placeholder artifacts that should never appear in final content.
+        if re.search(
+            r"(infographic explaining|step-by-step diagram showing|chart comparing typical)",
+            lower,
+        ):
+            issues.append("Placeholder artifact text present (diagram/infographic stub)")
+
+        # Missing baseline structure.
+        if not re.search(r"^##\s+", text, flags=re.MULTILINE):
+            issues.append("Missing H2 structure")
+        if (
+            "frequently asked questions" not in lower
+            and "## faq" not in lower
+        ):
+            issues.append("Missing FAQ section")
+        if len(re.findall(r"^###\s+", text, flags=re.MULTILINE)) < 2:
+            issues.append("FAQ/questions too thin (<2 H3 questions)")
+
+        # Metadata leakage or obvious malformed assembly.
+        if re.search(
+            r"(?:meta_description|meta_title|slug|target_state|keyword)\s*:",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            issues.append("Leaked metadata markers in body")
+        if re.search(r"[A-Za-z]\s+\*\s+[A-Za-z]", text):
+            issues.append("Malformed inline bullet injection")
+
+        # Truncated ending: non-empty text without terminal punctuation.
+        stripped = text.rstrip()
+        if stripped and stripped[-1] not in ".!?)\"'\n":
+            issues.append("Article appears truncated at ending")
+
+        return issues
+
     def _check_legal_compliance(self, content: str) -> tuple[float, list[str]]:
         """Check for unauthorized legal advice."""
         issues = []
@@ -1297,6 +1352,20 @@ Format each issue on its own line starting with "- "."""
             return "FACT_TRUNCATED_SENTENCE"
         if "leaked metadata in body" in text:
             return "FACT_METADATA_LEAK"
+        if "placeholder artifact text present" in text:
+            return "FORMAT_PLACEHOLDER_ARTIFACT"
+        if "missing h2 structure" in text:
+            return "FORMAT_MISSING_H2"
+        if "missing faq section" in text:
+            return "FORMAT_MISSING_FAQ"
+        if "faq/questions too thin" in text:
+            return "FORMAT_FAQ_THIN"
+        if "leaked metadata markers in body" in text:
+            return "FORMAT_METADATA_LEAK"
+        if "malformed inline bullet injection" in text:
+            return "FORMAT_MALFORMED_BULLETS"
+        if "article appears truncated at ending" in text:
+            return "FORMAT_TRUNCATED_ENDING"
 
         if "flesch-kincaid score" in text:
             return "READABILITY_LOW"
@@ -1346,7 +1415,12 @@ Format each issue on its own line starting with "- "."""
     def _severity_for_code(cls, code: str) -> str:
         if code in cls.CRITICAL_ISSUE_CODES:
             return "critical"
-        if code.startswith("READABILITY_") or code.startswith("FACT") or code.startswith("LEGAL_"):
+        if (
+            code.startswith("READABILITY_")
+            or code.startswith("FACT")
+            or code.startswith("LEGAL_")
+            or code.startswith("FORMAT_")
+        ):
             return "major"
         return "minor"
 

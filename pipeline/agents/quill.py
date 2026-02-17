@@ -2281,6 +2281,31 @@ Article:
                 f"Readability FK {report['flesch_kincaid']} below minimum {self.MIN_READABILITY}"
             )
 
+        # Hard structural blockers — don't send corrupted drafts to Sage.
+        lower = (content or "").lower()
+        if not re.search(r"^##\s+", content, flags=re.MULTILINE):
+            reasons.append("Missing H2 structure")
+        if "frequently asked questions" not in lower and "## faq" not in lower:
+            reasons.append("Missing FAQ section")
+        if len(re.findall(r"^###\s+", content, flags=re.MULTILINE)) < 2:
+            reasons.append("FAQ/questions too thin (<2 H3 questions)")
+        if re.search(
+            r"(infographic explaining|step-by-step diagram showing|chart comparing typical)",
+            lower,
+        ):
+            reasons.append("Contains placeholder artifact text")
+        if re.search(
+            r"(?:meta_description|meta_title|slug|target_state|keyword)\s*:",
+            content,
+            flags=re.IGNORECASE,
+        ):
+            reasons.append("Contains leaked metadata markers in body")
+        if re.search(r"[A-Za-z]\s+\*\s+[A-Za-z]", content):
+            reasons.append("Contains malformed inline bullet injection")
+        if re.search(r"(?:\b[A-Za-z]{2,}\s+){4,}\.\s*$", content):
+            # Whole article ending with an unfinished run-on sentence.
+            reasons.append("Article appears truncated at ending")
+
         if reasons:
             return False, "; ".join(reasons)
         return True, ""
