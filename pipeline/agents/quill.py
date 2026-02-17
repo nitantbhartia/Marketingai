@@ -419,7 +419,12 @@ class QuillAgent(BaseAgent):
         logger.info(f"Writing article: {article.target_keyword} (revision={is_revision})")
 
         try:
-            return self._write_one_inner(article, article_id, is_revision)
+            with self.metric_context(
+                article_id=article_id,
+                keyword=article.target_keyword,
+                phase="write",
+            ):
+                return self._write_one_inner(article, article_id, is_revision)
         except RateLimitError as e:
             logger.warning(f"Rate limited during pre-draft of article {article_id}: {e}")
             rollback_status = (

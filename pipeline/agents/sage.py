@@ -94,7 +94,10 @@ class SageAgent(BaseAgent):
                 continue
 
             try:
-                result = self._review_article(article)
+                with self.metric_context(
+                    article_id=article.id, keyword=article.target_keyword
+                ):
+                    result = self._review_article(article)
                 results.append(result)
             except RateLimitError as e:
                 # Rate limit — release the claim but keep status as

@@ -102,6 +102,64 @@
                 </div>
             </div>
 
+            <!-- ROI KPIs -->
+            <div class="pipeline-panel">
+                <div class="pipeline-header">
+                    <h2 class="section-title" style="margin-bottom: 0;">ROI KPIs ({{ roi_kpis.window_days }}d)</h2>
+                </div>
+                <div class="stats-grid" style="margin-top: 1rem; margin-bottom: 1rem;">
+                    <div class="stat-card stat-published">
+                        <div class="stat-icon">$</div>
+                        <div>
+                            <div class="stat-value">${{ "%.3f"|format(roi_kpis.cost_per_published_usd or 0) }}</div>
+                            <div class="stat-label">Cost per published article (estimated)</div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-review">
+                        <div class="stat-icon">&#x23F1;</div>
+                        <div>
+                            <div class="stat-value">{{ "%.1f"|format(roi_kpis.avg_time_to_index_days) if roi_kpis.avg_time_to_index_days is not none else "N/A" }}</div>
+                            <div class="stat-label">Avg time to index (days)</div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-ready">
+                        <div class="stat-icon">30d</div>
+                        <div>
+                            <div class="stat-value">{{ roi_kpis.clicks_per_article['30d']['avg_clicks'] }}</div>
+                            <div class="stat-label">Avg clicks/article (30d cohort)</div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-ready">
+                        <div class="stat-icon">60d</div>
+                        <div>
+                            <div class="stat-value">{{ roi_kpis.clicks_per_article['60d']['avg_clicks'] }}</div>
+                            <div class="stat-label">Avg clicks/article (60d cohort)</div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-ready">
+                        <div class="stat-icon">90d</div>
+                        <div>
+                            <div class="stat-value">{{ roi_kpis.clicks_per_article['90d']['avg_clicks'] }}</div>
+                            <div class="stat-label">Avg clicks/article (90d cohort)</div>
+                        </div>
+                    </div>
+                </div>
+                {% if roi_kpis.conversion_by_cluster %}
+                <div class="article-validation" style="margin-top: 0.5rem;">
+                    <strong>Conversion by Cluster:</strong>
+                    {% for cluster in roi_kpis.conversion_by_cluster[:6] %}
+                    <span class="state-badge" style="margin-left: 0.4rem;">
+                        {{ cluster.cluster }}: {{ "%.2f"|format(cluster.conversion_rate) }}%
+                    </span>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="pipeline-desc" style="margin-top: 0.5rem;">
+                    No CTA conversion data yet. Conversion-by-cluster will appear after CTA events are tracked.
+                </p>
+                {% endif %}
+            </div>
+
             <!-- Pipeline Control Panel -->
             <div class="pipeline-panel">
                 <div class="pipeline-header">

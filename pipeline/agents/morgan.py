@@ -106,6 +106,7 @@ class MorganAgent(BaseAgent):
                 pass
 
         pass_rate = (total_approved / total_reviewed * 100) if total_reviewed > 0 else 0
+        roi = self.db.get_roi_kpis(days=90)
 
         lines = [
             "# ClaimCoach Content Pipeline — Weekly Report",
@@ -128,8 +129,28 @@ class MorganAgent(BaseAgent):
             f"- Articles published: {len(published_this_week)}",
             f"- Articles reviewed: {total_reviewed}",
             f"- First-draft pass rate: {pass_rate:.0f}%",
+            f"- Estimated cost per published article (90d): ${roi.get('cost_per_published_usd', 0):.3f}",
+            (
+                f"- Avg time to index: {roi.get('avg_time_to_index_days')} days "
+                f"({roi.get('indexed_articles', 0)} indexed)"
+                if roi.get("avg_time_to_index_days") is not None
+                else "- Avg time to index: N/A (insufficient indexed article data)"
+            ),
+            f"- Avg clicks/article (30d cohort): {roi.get('clicks_per_article', {}).get('30d', {}).get('avg_clicks', 0)}",
+            f"- Avg clicks/article (60d cohort): {roi.get('clicks_per_article', {}).get('60d', {}).get('avg_clicks', 0)}",
+            f"- Avg clicks/article (90d cohort): {roi.get('clicks_per_article', {}).get('90d', {}).get('avg_clicks', 0)}",
             "",
         ]
+
+        clusters = roi.get("conversion_by_cluster", [])
+        if clusters:
+            lines.append("### Conversion by Cluster")
+            for c in clusters[:6]:
+                lines.append(
+                    f"- {c.get('cluster')}: {c.get('conversion_rate')}% "
+                    f"({c.get('conversions', 0)} conversions / {c.get('clicks', 0)} clicks)"
+                )
+            lines.append("")
 
         if published_this_week:
             lines.append("### Published Articles")

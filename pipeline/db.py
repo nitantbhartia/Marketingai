@@ -14,7 +14,7 @@ import sqlite3
 import uuid
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Generator
@@ -88,6 +88,7 @@ class Article:
     last_gsc_impressions: int = 0
     last_gsc_clicks: int = 0
     last_gsc_ctr: float = 0.0
+    gsc_first_seen_at: str = ""
     refresh_priority: str = ""
     cannibalization_flag: int = 0
 
@@ -213,6 +214,7 @@ CREATE TABLE IF NOT EXISTS articles (
     last_gsc_impressions INTEGER DEFAULT 0,
     last_gsc_clicks INTEGER DEFAULT 0,
     last_gsc_ctr REAL DEFAULT 0.0,
+    gsc_first_seen_at TEXT DEFAULT '',
     refresh_priority TEXT DEFAULT '',
     cannibalization_flag INTEGER DEFAULT 0,
 
@@ -296,6 +298,7 @@ _PIPELINE_COLUMN_MIGRATIONS = {
     "internal_links": "TEXT DEFAULT '[]'",
     "external_links": "TEXT DEFAULT '[]'",
     "sage_score": "REAL DEFAULT 0.0",
+    "gsc_first_seen_at": "TEXT DEFAULT ''",
 }
 
 
@@ -341,6 +344,19 @@ class Database:
     @staticmethod
     def _new_id() -> str:
         return str(uuid.uuid4())[:12]
+
+    @staticmethod
+    def _parse_ts(ts: str | None) -> datetime | None:
+        if not ts:
+            return None
+        try:
+            raw = ts.strip().replace("Z", "+00:00")
+            dt = datetime.fromisoformat(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return None
 
     # ── Article CRUD ─────────────────────────────────────────
 
@@ -538,6 +554,139 @@ class Database:
                 params,
             ).fetchall()
         return [PipelineMetric(**dict(r)) for r in rows]
+
+    def get_roi_kpis(self, days: int = 90) -> dict:
+        """Compute ROI KPIs for dashboard/reporting."""
+        now = datetime.now(timezone.utc)
+        since_dt = now - timedelta(days=max(1, days))
+        since = since_dt.isoformat()
+
+        with self._connect() as conn:
+            # Cost: from estimated per-call llm_call metrics.
+            cost_row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(metric_value), 0.0) AS total_cost,
+                    COUNT(*) AS llm_calls
+                FROM pipeline_metrics
+                WHERE metric_name = 'llm_call' AND timestamp >= ?
+                """,
+                (since,),
+            ).fetchone()
+            total_cost = float(cost_row["total_cost"] or 0.0)
+            llm_calls = int(cost_row["llm_calls"] or 0)
+
+            pub_row = conn.execute(
+                """
+                SELECT COUNT(*) AS published_count
+                FROM articles
+                WHERE status IN ('done', 'amplified')
+                  AND published_at IS NOT NULL
+                  AND published_at != ''
+                  AND published_at >= ?
+                """,
+                (since,),
+            ).fetchone()
+            published_count = int(pub_row["published_count"] or 0)
+            cost_per_published = (
+                total_cost / published_count if published_count > 0 else 0.0
+            )
+
+            # Index latency: time from publish -> first observed GSC visibility.
+            latency_rows = conn.execute(
+                """
+                SELECT published_at, gsc_first_seen_at
+                FROM articles
+                WHERE published_at IS NOT NULL AND published_at != ''
+                  AND gsc_first_seen_at IS NOT NULL AND gsc_first_seen_at != ''
+                """
+            ).fetchall()
+            latencies: list[float] = []
+            for row in latency_rows:
+                published_at = self._parse_ts(row["published_at"])
+                first_seen = self._parse_ts(row["gsc_first_seen_at"])
+                if not published_at or not first_seen:
+                    continue
+                delta_days = (first_seen - published_at).total_seconds() / 86400
+                if delta_days >= 0:
+                    latencies.append(delta_days)
+            avg_time_to_index = round(sum(latencies) / len(latencies), 2) if latencies else None
+
+            # Clicks/article at 30/60/90 days (cohort averages using current 7d clicks snapshot).
+            clicks_by_age: dict[str, dict[str, float | int]] = {}
+            for age in (30, 60, 90):
+                cutoff = (now - timedelta(days=age)).isoformat()
+                row = conn.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS n,
+                        COALESCE(AVG(last_gsc_clicks), 0.0) AS avg_clicks
+                    FROM articles
+                    WHERE status IN ('done', 'amplified')
+                      AND published_at IS NOT NULL
+                      AND published_at != ''
+                      AND published_at <= ?
+                    """,
+                    (cutoff,),
+                ).fetchone()
+                clicks_by_age[f"{age}d"] = {
+                    "articles": int(row["n"] or 0),
+                    "avg_clicks": round(float(row["avg_clicks"] or 0.0), 2),
+                }
+
+            # Conversion rate by content cluster/category.
+            cluster_rows = []
+            try:
+                cluster_rows = conn.execute(
+                    """
+                    SELECT
+                        COALESCE(NULLIF(a.content_category, ''), 'uncategorized') AS cluster,
+                        COUNT(DISTINCT a.id) AS articles,
+                        COALESCE(SUM(c.impressions), 0) AS impressions,
+                        COALESCE(SUM(c.clicks), 0) AS clicks,
+                        COALESCE(SUM(c.conversions), 0) AS conversions
+                    FROM articles a
+                    LEFT JOIN cta_variants c ON c.article_id = a.id
+                    WHERE a.status IN ('done', 'amplified')
+                      AND a.published_at IS NOT NULL
+                      AND a.published_at != ''
+                    GROUP BY cluster
+                    ORDER BY conversions DESC, clicks DESC
+                    """
+                ).fetchall()
+            except Exception:
+                cluster_rows = []
+
+            conversion_by_cluster = []
+            for row in cluster_rows:
+                clicks = int(row["clicks"] or 0)
+                impressions = int(row["impressions"] or 0)
+                conversions = int(row["conversions"] or 0)
+                rate = (conversions / clicks) if clicks > 0 else (
+                    conversions / impressions if impressions > 0 else 0.0
+                )
+                conversion_by_cluster.append(
+                    {
+                        "cluster": row["cluster"],
+                        "articles": int(row["articles"] or 0),
+                        "impressions": impressions,
+                        "clicks": clicks,
+                        "conversions": conversions,
+                        "conversion_rate": round(rate * 100, 2),
+                    }
+                )
+
+        return {
+            "window_days": days,
+            "estimated_cost_usd": round(total_cost, 4),
+            "llm_calls": llm_calls,
+            "published_articles": published_count,
+            "cost_per_published_usd": round(cost_per_published, 4),
+            "avg_time_to_index_days": avg_time_to_index,
+            "indexed_articles": len(latencies),
+            "clicks_per_article": clicks_by_age,
+            "conversion_by_cluster": conversion_by_cluster,
+        }
 
     # ── Social Posts ─────────────────────────────────────────
 

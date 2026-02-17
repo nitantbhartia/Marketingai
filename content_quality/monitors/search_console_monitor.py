@@ -233,6 +233,11 @@ class SearchConsoleMonitor:
                             last_gsc_impressions = ?,
                             last_gsc_clicks = ?,
                             last_gsc_ctr = ?,
+                            gsc_first_seen_at = CASE
+                                WHEN (gsc_first_seen_at IS NULL OR gsc_first_seen_at = '')
+                                     AND ? > 0 THEN CURRENT_TIMESTAMP
+                                ELSE gsc_first_seen_at
+                            END,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                     """, (
@@ -240,7 +245,23 @@ class SearchConsoleMonitor:
                         item.get("impressions"),
                         item.get("clicks", 0),
                         item.get("ctr", 0),
+                        item.get("impressions", 0),
                         article_id
+                    ))
+
+                    # Store a historical snapshot when we have page-level data.
+                    db.execute("""
+                        INSERT INTO gsc_snapshots
+                        (article_id, query, page_url, position, impressions, clicks, ctr, snapshot_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, date('now'))
+                    """, (
+                        article_id,
+                        item.get("query", ""),
+                        page,
+                        item.get("position"),
+                        item.get("impressions", 0),
+                        item.get("clicks", 0),
+                        item.get("ctr", 0),
                     ))
 
                     # Set refresh priority if almost page one

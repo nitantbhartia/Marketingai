@@ -67,6 +67,31 @@ templates = Jinja2Templates(directory=str(templates_dir))
 recent_notifications = []
 
 
+def _load_roi_kpis() -> Dict[str, Any]:
+    """Load ROI KPIs from pipeline metrics and article data."""
+    try:
+        from pipeline.config import Config
+        from pipeline.db import Database
+
+        cfg = Config.load()
+        db = Database(cfg.resolve_path(cfg.pipeline.database_path))
+        return db.get_roi_kpis(days=90)
+    except Exception:
+        return {
+            "window_days": 90,
+            "estimated_cost_usd": 0.0,
+            "llm_calls": 0,
+            "published_articles": 0,
+            "cost_per_published_usd": 0.0,
+            "avg_time_to_index_days": None,
+            "indexed_articles": 0,
+            "clicks_per_article": {"30d": {"articles": 0, "avg_clicks": 0.0},
+                                   "60d": {"articles": 0, "avg_clicks": 0.0},
+                                   "90d": {"articles": 0, "avg_clicks": 0.0}},
+            "conversion_by_cluster": [],
+        }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, status: Optional[str] = None):
     """Main dashboard showing all articles in review."""
@@ -147,6 +172,8 @@ async def dashboard(request: Request, status: Optional[str] = None):
         except Exception:
             pass  # Table may not exist yet
 
+        roi_kpis = _load_roi_kpis()
+
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
             "articles": articles,
@@ -155,6 +182,7 @@ async def dashboard(request: Request, status: Optional[str] = None):
             "approval_threshold": approval_threshold,
             "max_revision_rounds": max_revision_rounds,
             "rate_limit_count": rate_limit_count,
+            "roi_kpis": roi_kpis,
             "recent_notifications": recent_notifications[-10:],  # Last 10
             "now": datetime.now()
         })
@@ -502,6 +530,7 @@ async def get_stats():
         "status_counts": status_counts,
         "recent_activity": recent_activity,
         "scores": scores,
+        "roi_kpis": _load_roi_kpis(),
         "notifications_count": len(recent_notifications)
     }
 

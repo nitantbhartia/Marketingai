@@ -77,6 +77,7 @@ def init_database():
                 last_gsc_impressions INTEGER,
                 last_gsc_clicks INTEGER,
                 last_gsc_ctr REAL,
+                gsc_first_seen_at TIMESTAMP,
                 refresh_priority TEXT,
                 cannibalization_flag BOOLEAN DEFAULT 0,
 
@@ -261,6 +262,7 @@ def _run_migrations(db):
             "suggested_title": "TEXT DEFAULT ''",
             "internal_links": "TEXT DEFAULT '[]'",
             "external_links": "TEXT DEFAULT '[]'",
+            "gsc_first_seen_at": "TIMESTAMP",
         }
 
         for col, col_type in migrations.items():

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -37,6 +39,16 @@ _token_window: list[tuple[float, int]] = []  # (timestamp, token_count) entries
 _TPM_LIMIT = 4_000_000  # Gemini paid tier TPM limit
 _TPM_WINDOW = 60.0      # 60-second sliding window
 _TPM_PARK_SECONDS = 5.0  # How long to park when approaching limit
+
+# Estimated token pricing (USD per 1M tokens). Used for ROI trend tracking.
+# These are intentionally conservative estimates, not exact invoice billing.
+_MODEL_PRICING_PER_MILLION: dict[str, tuple[float, float]] = {
+    "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-pro": (1.25, 10.00),
+    "claude-haiku-4-5-20251001": (1.00, 5.00),
+    "claude-sonnet-4-5-20250929": (3.00, 15.00),
+}
 
 
 def _budget_key(model: str) -> str:
@@ -91,6 +103,53 @@ class BaseAgent(ABC):
         self.config = config
         self.db = db
         self.logger = logging.getLogger(f"pipeline.{self.name}")
+
+    @contextmanager
+    def metric_context(self, **fields: Any):
+        """Attach transient context fields to llm_call metrics."""
+        prev = getattr(self, "_metric_context", {})
+        merged = dict(prev)
+        merged.update({k: v for k, v in fields.items() if v is not None})
+        self._metric_context = merged
+        try:
+            yield
+        finally:
+            self._metric_context = prev
+
+    def _estimate_llm_cost(
+        self, model: str, input_tokens: int, output_tokens: int
+    ) -> float:
+        in_price, out_price = _MODEL_PRICING_PER_MILLION.get(model, (0.30, 2.50))
+        return round(
+            (max(0, input_tokens) / 1_000_000 * in_price)
+            + (max(0, output_tokens) / 1_000_000 * out_price),
+            8,
+        )
+
+    def _record_llm_call_metric(
+        self,
+        model: str,
+        provider: str,
+        input_tokens: int,
+        output_tokens: int,
+        latency_ms: int,
+    ) -> None:
+        details = {
+            "agent": self.name,
+            "provider": provider,
+            "model": model,
+            "input_tokens": int(input_tokens),
+            "output_tokens": int(output_tokens),
+            "latency_ms": int(latency_ms),
+            "cost_estimate_usd": self._estimate_llm_cost(
+                model, input_tokens, output_tokens
+            ),
+            "pricing_mode": "estimated",
+        }
+        details.update(getattr(self, "_metric_context", {}) or {})
+        self.db.record_metric(
+            "llm_call", details["cost_estimate_usd"], details=json.dumps(details)
+        )
 
     @property
     def provider(self) -> str:
@@ -320,8 +379,23 @@ class BaseAgent(ABC):
         last_error: Exception | None = None
         for attempt in range(max_retries):
             try:
+                started = time.time()
                 response = client.messages.create(**kwargs)
                 text = response.content[0].text
+                usage = getattr(response, "usage", None)
+                in_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+                out_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+                if in_tokens <= 0:
+                    in_tokens = _estimate_tokens((system or "") + prompt)
+                if out_tokens <= 0:
+                    out_tokens = _estimate_tokens(text)
+                self._record_llm_call_metric(
+                    model=model,
+                    provider="anthropic",
+                    input_tokens=in_tokens,
+                    output_tokens=out_tokens,
+                    latency_ms=int((time.time() - started) * 1000),
+                )
                 self.logger.debug(f"Claude response length={len(text)}")
                 return text
             except anthropic.RateLimitError as e:
@@ -439,6 +513,7 @@ class BaseAgent(ABC):
                     data=payload,
                     headers={"Content-Type": "application/json"},
                 )
+                started = time.time()
                 with urllib.request.urlopen(req, timeout=request_timeout) as resp:
                     result = json.loads(resp.read())
 
@@ -453,8 +528,18 @@ class BaseAgent(ABC):
                 text = candidates[0]["content"]["parts"][0]["text"]
                 self._record_budget_usage(model_name)
                 # Track tokens for TPM sliding window
-                total_tokens = estimated_prompt_tokens + _estimate_tokens(text)
+                usage = result.get("usageMetadata", {})
+                in_tokens = int(usage.get("promptTokenCount") or estimated_prompt_tokens)
+                out_tokens = int(usage.get("candidatesTokenCount") or _estimate_tokens(text))
+                total_tokens = in_tokens + out_tokens
                 _record_tokens(total_tokens)
+                self._record_llm_call_metric(
+                    model=model_name,
+                    provider="gemini",
+                    input_tokens=in_tokens,
+                    output_tokens=out_tokens,
+                    latency_ms=int((time.time() - started) * 1000),
+                )
                 self.logger.debug(
                     f"Gemini response length={len(text)} "
                     f"[{model_name} budget: {_budget_counters.get(_budget_key(model_name), 0)}, "
