@@ -439,7 +439,7 @@ class SageAgent(BaseAgent):
             all_issues.append(f"[State Accuracy] {msg}")
 
         # 10. Product compliance
-        product_validator = ProductClaimValidator()
+        product_validator = ProductClaimValidator(product=article.product)
         product_result = product_validator.validate(content)
         product_compliance = product_result["status"]  # PASS / FAIL
         for v in product_result.get("hard_violations", []):
@@ -791,7 +791,7 @@ Article excerpt:
 
     def _ai_fact_check(self, content: str, article) -> list[str]:
         """Use Claude to check facts against reference docs."""
-        product_context = self.config.load_product_context()
+        product_context = self.config.load_product_context(article.product)
 
         prompt = f"""Review this article for factual accuracy. Check it against the product context below.
 

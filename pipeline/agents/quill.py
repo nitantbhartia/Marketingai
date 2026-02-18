@@ -359,35 +359,75 @@ class QuillAgent(BaseAgent):
         recovered = self._recover_stale_in_progress()
 
         max_per_run = getattr(self.config.pipeline, "max_articles_per_run", 3)
-        daily_cap = max(1, int(getattr(self.config.pipeline, "daily_article_cap", 8)))
-        written_today = self._count_written_today()
-        if written_today >= daily_cap:
+        products = list(getattr(self.config.pipeline, "products", []) or ["claimcoach"])
+        per_product_caps = getattr(self.config.pipeline, "daily_article_cap_by_product", {}) or {}
+        default_cap = max(1, int(getattr(self.config.pipeline, "daily_article_cap", 8)))
+        cap_for: dict[str, int] = {
+            p: max(1, int(per_product_caps.get(p, default_cap)))
+            for p in products
+        }
+        written_for: dict[str, int] = {
+            p: self._count_written_today(product=p)
+            for p in products
+        }
+        available_products = [
+            p for p in products if written_for.get(p, 0) < cap_for.get(p, default_cap)
+        ]
+        if not available_products:
             logger.info(
-                f"Daily article cap reached: {written_today}/{daily_cap}. "
-                "Skipping Quill run."
+                "Daily article cap reached for all products: %s",
+                ", ".join(f"{p} {written_for[p]}/{cap_for[p]}" for p in products),
             )
             return {
                 "status": "idle",
                 "reason": "daily_cap_reached",
-                "written_today": written_today,
+                "written_today_by_product": written_for,
                 "recovered_stale_in_progress": recovered,
             }
 
-        remaining_quota = max(0, daily_cap - written_today)
-        max_per_run = min(max_per_run, remaining_quota)
+        remaining_quota = sum(cap_for[p] - written_for[p] for p in available_products)
+        max_per_run = min(max_per_run, max(0, remaining_quota))
         max_revisions = max(1, max_per_run - 1)  # reserve 1 slot for new work
         results: list[dict[str, Any]] = []
         revision_count = 0
+        product_cursor = 0
 
         for _ in range(max_per_run):
             # Alternate: revisions first, but cap them
             prefer_revision = revision_count < max_revisions
-            result = self._write_one(prefer_revision=prefer_revision)
+            result = {"status": "idle", "reason": "no_articles"}
+            selected_product = None
+            if not available_products:
+                break
+
+            for offset in range(len(available_products)):
+                idx = (product_cursor + offset) % len(available_products)
+                product = available_products[idx]
+                if written_for.get(product, 0) >= cap_for.get(product, default_cap):
+                    continue
+                attempt = self._write_one(prefer_revision=prefer_revision, product=product)
+                if attempt.get("status") == "idle":
+                    continue
+                selected_product = product
+                result = attempt
+                product_cursor = (idx + 1) % max(len(available_products), 1)
+                break
+
             if result["status"] == "idle":
-                break  # nothing left to write
+                break  # no available product had claimable work
+
             results.append(result)
             if result.get("is_revision"):
                 revision_count += 1
+            if (
+                selected_product
+                and result["status"] == "success"
+            ):
+                written_for[selected_product] = written_for.get(selected_product, 0) + 1
+                if written_for[selected_product] >= cap_for.get(selected_product, default_cap):
+                    available_products = [p for p in available_products if p != selected_product]
+                    if available_products:
+                        product_cursor %= len(available_products)
             if result["status"] in ("error", "rate_limited"):
                 break  # stop on error or rate limit to avoid burning quota
 
@@ -397,6 +437,7 @@ class QuillAgent(BaseAgent):
                 "status": "idle",
                 "reason": "no_articles",
                 "recovered_stale_in_progress": recovered,
+                "written_today_by_product": written_for,
             }
 
         if len(results) == 1:
@@ -408,6 +449,7 @@ class QuillAgent(BaseAgent):
             "articles_written": len([r for r in results if r["status"] == "success"]),
             "recovered_stale_in_progress": recovered,
             "results": results,
+            "written_today_by_product": written_for,
         }
 
     def _recover_stale_in_progress(self) -> int:
@@ -442,17 +484,33 @@ class QuillAgent(BaseAgent):
             )
         return len(stale_in_progress)
 
-    def _count_written_today(self) -> int:
+    def _count_written_today(self, product: str | None = None) -> int:
         """Count successful Quill writes since UTC midnight."""
         now = datetime.now(timezone.utc)
         start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
         metrics = self.db.get_metrics(name="quill_write", since=start_of_day, limit=2000)
-        return len(metrics)
+        if not product:
+            return len(metrics)
+        normalized = product.strip().lower()
+        count = 0
+        for metric in metrics:
+            details = metric.details or ""
+            if not details:
+                continue
+            try:
+                payload = json.loads(details)
+            except Exception:
+                continue
+            if (payload.get("product") or "claimcoach").strip().lower() == normalized:
+                count += 1
+        return count
 
     # ------------------------------------------------------------------
     # Single-article pipeline (called in a loop by run())
     # ------------------------------------------------------------------
-    def _write_one(self, prefer_revision: bool = True) -> dict[str, Any]:
+    def _write_one(
+        self, prefer_revision: bool = True, product: str | None = None
+    ) -> dict[str, Any]:
         """Write or revise a single article through the 3-phase pipeline.
 
         When *prefer_revision* is True, revision articles are tried first.
@@ -464,21 +522,23 @@ class QuillAgent(BaseAgent):
 
         if prefer_revision:
             # Try revision first, then TODO
-            article_id = self._try_revision()
+            article_id = self._try_revision(product=product)
             is_revision = article_id is not None
             if article_id is None:
                 article_id = self.pick_and_claim(
                     from_status=ArticleStatus.TODO.value,
                     to_status=ArticleStatus.IN_PROGRESS.value,
+                    product=product,
                 )
         else:
             # Try TODO first, then revision
             article_id = self.pick_and_claim(
                 from_status=ArticleStatus.TODO.value,
                 to_status=ArticleStatus.IN_PROGRESS.value,
+                product=product,
             )
             if article_id is None:
-                article_id = self._try_revision()
+                article_id = self._try_revision(product=product)
                 is_revision = article_id is not None
 
         if article_id is None:
@@ -526,7 +586,7 @@ class QuillAgent(BaseAgent):
     def _write_one_inner(self, article, article_id: int, is_revision: bool) -> dict[str, Any]:
         """Inner write logic — caller guarantees claim release on exception."""
         # Load context documents
-        product_context = self.config.load_product_context()
+        product_context = self.config.load_product_context(article.product)
         state_rules = self.config.load_state_rules()
         seo_template = self.config.load_seo_template()
         published = self.db.get_published_articles()
@@ -629,7 +689,7 @@ class QuillAgent(BaseAgent):
 
             # ── Quality gate: don't waste a Sage review on content that
             # clearly can't pass the approval threshold. ──
-            gate_pass, gate_reason = self._passes_minimum_bar(content, wc)
+            gate_pass, gate_reason = self._passes_minimum_bar(content, wc, article=article)
             if not gate_pass:
                 logger.warning(
                     f"Article {article_id} failed quality gate: {gate_reason}"
@@ -683,6 +743,7 @@ class QuillAgent(BaseAgent):
 
         self.db.record_metric("quill_write", wc, json.dumps({
             "article_id": article_id,
+            "product": (getattr(article, "product", "") or "claimcoach").strip().lower(),
             "keyword": article.target_keyword,
             "is_revision": is_revision,
             "word_count": wc,
@@ -2599,17 +2660,28 @@ Article:
     MAX_WORD_COUNT = 1800
     MIN_READABILITY = 40
 
-    def _passes_minimum_bar(self, content: str, wc: int) -> tuple[bool, str]:
+    def _max_word_count_for_article(self, article=None) -> int:
+        product = (getattr(article, "product", "") or "claimcoach").strip().lower()
+        overrides = getattr(self.config.pipeline, "max_word_count_by_product", {}) or {}
+        try:
+            return int(overrides.get(product, self.MAX_WORD_COUNT))
+        except Exception:
+            return self.MAX_WORD_COUNT
+
+    def _passes_minimum_bar(
+        self, content: str, wc: int, article=None
+    ) -> tuple[bool, str]:
         """Check if content meets the minimum bar for Sage review.
 
         Returns (passes, reason). Articles that fail are held back so
         Quill can retry rather than wasting a Sage review cycle.
         """
         reasons = []
+        max_word_count = self._max_word_count_for_article(article)
         if wc < self.MIN_WORD_COUNT:
             reasons.append(f"Word count {wc} below minimum {self.MIN_WORD_COUNT}")
-        if wc > self.MAX_WORD_COUNT:
-            reasons.append(f"Word count {wc} exceeds maximum {self.MAX_WORD_COUNT}")
+        if wc > max_word_count:
+            reasons.append(f"Word count {wc} exceeds maximum {max_word_count}")
 
         report = readability_report(content)
         if report["flesch_kincaid"] < self.MIN_READABILITY:
@@ -2818,7 +2890,7 @@ Article:
             wc = word_count(content)
 
             # Quality gate — same check as _write_one
-            gate_pass, gate_reason = self._passes_minimum_bar(content, wc)
+            gate_pass, gate_reason = self._passes_minimum_bar(content, wc, article=article)
             if not gate_pass:
                 logger.warning(
                     f"Targeted revision of {article.id} failed quality gate: {gate_reason}"
@@ -2860,6 +2932,7 @@ Article:
 
         self.db.record_metric("quill_write", wc, json.dumps({
             "article_id": article.id,
+            "product": (getattr(article, "product", "") or "claimcoach").strip().lower(),
             "keyword": article.target_keyword,
             "is_revision": True,
             "revision_type": "targeted",
@@ -3129,10 +3202,10 @@ Article:
             "Most total loss settlements are initially 15-25% below fair market value. The insurance company is counting on you not knowing this.",
         ])
 
-    def _try_revision(self) -> int | None:
+    def _try_revision(self, product: str | None = None) -> int | None:
         """Try to pick up an article in revision status."""
         articles = self.db.query_articles(
-            status=ArticleStatus.REVISION.value, limit=10
+            status=ArticleStatus.REVISION.value, product=product, limit=10
         )
         for article in articles:
             if article.revision_count >= self.config.pipeline.max_revision_rounds:

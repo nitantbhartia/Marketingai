@@ -57,6 +57,7 @@ class ArticleInput(BaseModel):
     meta_description: str
     slug: str
     target_state: Optional[str] = None
+    product: Optional[str] = "claimcoach"
 
 
 class ValidationResult(BaseModel):
@@ -114,7 +115,10 @@ async def validate_state_endpoint(article: ArticleInput):
 async def validate_product_endpoint(article: ArticleInput):
     """Validate product claims."""
     try:
-        result = validate_product_claims(article.article_markdown)
+        result = validate_product_claims(
+            article.article_markdown,
+            product=article.product or "claimcoach",
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -178,7 +182,10 @@ async def validate_all_endpoint(article: ArticleInput):
     try:
         # Run all validators
         state_result = validate_state_rules(article.article_markdown, article.target_state)
-        product_result = validate_product_claims(article.article_markdown)
+        product_result = validate_product_claims(
+            article.article_markdown,
+            product=article.product or "claimcoach",
+        )
         seo_result = score_seo({
             "article_markdown": article.article_markdown,
             "target_keyword": article.target_keyword,

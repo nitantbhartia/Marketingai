@@ -7,16 +7,73 @@ making promises it can't keep, or using legally risky language.
 
 import re
 from typing import Dict, List, Tuple
-from pathlib import Path
 
-from content_quality.config import PRODUCT_CONTEXT_PATH
+from content_quality.config import PRODUCT_CONTEXT_PATH, REFERENCE_DIR
 
 
 class ProductClaimValidator:
     """Validates product claims against approved capabilities."""
 
+    COMMON_HARD_FAIL_PATTERNS = [
+        # Guarantees and promises
+        (
+            r"guarantee[ds]?\s+(you|a|more|higher|additional|extra)",
+            "guarantee",
+            "Never guarantee outcomes. Rewrite without guarantees."
+        ),
+        (
+            r"(100%|always)\s*(success|work|effective|guaranteed)",
+            "guarantee",
+            "Avoid absolute claims. Use 'commonly', 'often', or 'typically'."
+        ),
+        (
+            r"(will|going to)\s*(get|receive|recover|win)\s*(you\s+)?(more|extra|additional|higher|thousands|hundreds)",
+            "overpromise",
+            "Don't promise specific monetary outcomes. Rewrite to focus on identification."
+        ),
+        (
+            r"average\s+(user|customer|person|claimant)\s+(recover|get|receive)s?\s+\$[\d,]+",
+            "overpromise",
+            "Don't cite average recovery amounts without data. Remove claim."
+        ),
+
+        # Legal advice
+        (
+            r"you\s+(are|are not)\s+legally\s+(entitled|required|obligated)",
+            "legal_advice",
+            "Don't make legal entitlement claims. Suggest consulting a lawyer."
+        ),
+        (
+            r"the\s+law\s+(requires|mandates|says)\s+(your\s+)?(insurer|insurance company|adjuster|provider|hospital)\s+(must|to)",
+            "legal_advice",
+            "Don't interpret law. Cite statute and suggest legal consultation."
+        ),
+        (
+            r"(sue|lawsuit|take legal action|go to court)",
+            "legal_advice",
+            "Don't advise litigation. Suggest consulting an attorney."
+        ),
+        (
+            r"(this constitutes|this is not|we provide|we offer)\s+legal\s+advice",
+            "legal_advice",
+            "Don't define legal advice. Let disclaimer handle this."
+        ),
+
+        # Risk claims
+        (
+            r"(risk.?free|no.?risk|nothing to lose)",
+            "overpromise",
+            "Remove risk-free claims. Focus on concrete value."
+        ),
+        (
+            r"(we|claimcoach|billkarma|billscan)\s+(ensure|ensure that|make sure)\s+(you get|you receive|your settlement|your reduction|your savings)",
+            "overpromise",
+            "Don't claim to ensure outcomes. Say 'helps you identify' instead."
+        ),
+    ]
+
     # Feature hallucinations (things ClaimCoach does NOT do)
-    HARD_FAIL_PATTERNS = [
+    CLAIMCOACH_HARD_FAIL_PATTERNS = [
         # Negotiation claims
         (
             r"(claimcoach|claim coach|we|our tool).*(negotiate|negotiates|negotiating).*(for you|on your behalf|with.*insurer|with.*adjuster)",
@@ -70,61 +127,34 @@ class ProductClaimValidator:
             "feature_hallucination",
             "ClaimCoach does NOT integrate with insurer systems. Remove this claim."
         ),
+    ]
 
-        # Guarantees and promises
+    # Feature hallucinations (things BillKarma does NOT do)
+    MEDBILL_HARD_FAIL_PATTERNS = [
         (
-            r"guarantee[ds]?\s+(you|a|more|higher|additional|extra)",
-            "guarantee",
-            "Never guarantee outcomes. Rewrite without guarantees."
+            r"(billkarma|billscan|bill karma|bill scan|we|our tool).*(file|files|filing).*(insurance claim|insurance appeal)",
+            "feature_hallucination",
+            "BillKarma does NOT file insurance claims or appeals for users."
         ),
         (
-            r"(100%|always)\s*(success|work|effective|guaranteed)",
-            "guarantee",
-            "Avoid absolute claims. Use 'commonly', 'often', or 'typically'."
+            r"(billkarma|billscan|bill karma|bill scan|we|our tool).*(provide|gives?|offer).*(diagnosis|medical advice)",
+            "feature_hallucination",
+            "BillKarma does NOT provide medical advice."
         ),
         (
-            r"(will|going to)\s*(get|receive|recover|win)\s*(you\s+)?(more|extra|additional|higher|thousands|hundreds)",
-            "overpromise",
-            "Don't promise specific monetary outcomes. Rewrite to focus on identification."
+            r"(billkarma|billscan|bill karma|bill scan|we|our tool).*(verify|determine|decide).*(medical necessity|medically necessary)",
+            "feature_hallucination",
+            "BillKarma does NOT determine medical necessity."
         ),
         (
-            r"average\s+(user|customer|person|claimant)\s+(recover|get|receive)s?\s+\$[\d,]+",
-            "overpromise",
-            "Don't cite average recovery amounts without data. Remove claim."
-        ),
-
-        # Legal advice
-        (
-            r"you\s+(are|are not)\s+legally\s+(entitled|required|obligated)",
-            "legal_advice",
-            "Don't make legal entitlement claims. Suggest consulting a lawyer."
+            r"(billkarma|billscan|bill karma|bill scan|we|our tool).*(replace|instead of).*(attorney|lawyer|legal counsel)",
+            "feature_hallucination",
+            "BillKarma does NOT replace legal representation."
         ),
         (
-            r"the\s+law\s+(requires|mandates|says)\s+(your\s+)?(insurer|insurance company|adjuster)\s+(must|to)",
-            "legal_advice",
-            "Don't interpret law. Cite statute and suggest legal consultation."
-        ),
-        (
-            r"(sue|lawsuit|take legal action|go to court)",
-            "legal_advice",
-            "Don't advise litigation. Suggest consulting an attorney."
-        ),
-        (
-            r"(this constitutes|this is not|we provide|we offer)\s+legal\s+advice",
-            "legal_advice",
-            "Don't define legal advice. Let disclaimer handle this."
-        ),
-
-        # Risk claims
-        (
-            r"(risk.?free|no.?risk|nothing to lose)",
-            "overpromise",
-            "Remove risk-free claims. Focus on 'no credit card required'."
-        ),
-        (
-            r"(we|claimcoach)\s+(ensure|ensure that|make sure)\s+(you get|you receive|your settlement)",
-            "overpromise",
-            "Don't claim to ensure outcomes. Say 'helps you identify' instead."
+            r"(billkarma|billscan|bill karma|bill scan|we|our tool).*(access|store|pull).*(medical records|full patient records|ehr|emr)",
+            "feature_hallucination",
+            "BillKarma does not claim access to full medical records beyond bill data."
         ),
     ]
 
@@ -152,17 +182,30 @@ class ProductClaimValidator:
         ),
     ]
 
-    def __init__(self):
+    def __init__(self, product: str = "claimcoach"):
         """Initialize validator."""
+        self.product = (product or "claimcoach").strip().lower()
         self.product_context = self._load_product_context()
 
     def _load_product_context(self) -> str:
         """Load product context reference file."""
         try:
+            if self.product == "medbill":
+                medbill_path = REFERENCE_DIR / "MEDBILL_PRODUCT_CONTEXT.md"
+                if medbill_path.exists():
+                    return medbill_path.read_text()
             with open(PRODUCT_CONTEXT_PATH, 'r') as f:
                 return f.read()
         except FileNotFoundError:
             return ""
+
+    def _hard_fail_patterns(self) -> List[Tuple[str, str, str]]:
+        patterns = list(self.COMMON_HARD_FAIL_PATTERNS)
+        if self.product == "medbill":
+            patterns.extend(self.MEDBILL_HARD_FAIL_PATTERNS)
+        else:
+            patterns.extend(self.CLAIMCOACH_HARD_FAIL_PATTERNS)
+        return patterns
 
     def validate(self, article_markdown: str) -> Dict:
         """
@@ -181,7 +224,7 @@ class ProductClaimValidator:
         soft_warnings = []
 
         # Check hard fail patterns
-        for pattern, category, suggestion in self.HARD_FAIL_PATTERNS:
+        for pattern, category, suggestion in self._hard_fail_patterns():
             for match in re.finditer(pattern, text_lower, re.IGNORECASE):
                 # Find line number
                 line_num = text_lower[:match.start()].count('\n') + 1
@@ -218,7 +261,7 @@ class ProductClaimValidator:
         }
 
 
-def validate_product_claims(article_markdown: str) -> Dict:
+def validate_product_claims(article_markdown: str, product: str = "claimcoach") -> Dict:
     """
     Convenience function to validate product claims.
 
@@ -228,5 +271,5 @@ def validate_product_claims(article_markdown: str) -> Dict:
     Returns:
         Validation result dict
     """
-    validator = ProductClaimValidator()
+    validator = ProductClaimValidator(product=product)
     return validator.validate(article_markdown)

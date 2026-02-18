@@ -272,7 +272,9 @@ class BaseAgent(ABC):
         claim_id = self.generate_claim_id()
         return self.db.try_claim(article_id, self.claim_field, claim_id, new_status)
 
-    def pick_and_claim(self, from_status: str, to_status: str) -> int | None:
+    def pick_and_claim(
+        self, from_status: str, to_status: str, product: str | None = None
+    ) -> int | None:
         """Pick the highest-priority unclaimed article from a status and claim it.
 
         Returns article ID if successful, None otherwise.
@@ -301,6 +303,7 @@ class BaseAgent(ABC):
 
         articles = self.db.query_articles(
             status=from_status,
+            product=product,
             writer_claim_empty=(self.claim_field == "writer_claim"),
             limit=50,
             order_by=order_by,

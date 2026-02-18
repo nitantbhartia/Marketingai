@@ -111,6 +111,7 @@ class TwitterConfig:
 class PipelineSettings:
     database_path: str = "pipeline.db"
     product_context_path: str = "reference/PRODUCT_CONTEXT.md"
+    medbill_product_context_path: str = "reference/MEDBILL_PRODUCT_CONTEXT.md"
     state_rules_path: str = "reference/STATE_RULES.md"
     seo_template_path: str = "reference/SEO_ARTICLE_TEMPLATE.md"
     blog_output_dir: str = "output/blog"
@@ -118,7 +119,11 @@ class PipelineSettings:
     articles_per_week_target: int = 7
     max_articles_per_run: int = 3
     daily_article_cap: int = 8
+    daily_article_cap_by_product: dict[str, int] = field(default_factory=dict)
     daily_promote_cap: int = 8
+    max_word_count_by_product: dict[str, int] = field(
+        default_factory=lambda: {"medbill": 2500}
+    )
     products: list[str] = field(default_factory=lambda: ["claimcoach", "medbill"])
     max_revision_rounds: int = 5
     quill_stale_recovery_hours: int = 4
@@ -305,9 +310,21 @@ class Config:
             return p
         return self._base_dir / p
 
-    def load_product_context(self) -> str:
+    def load_product_context(self, product: str | None = None) -> str:
         """Load PRODUCT_CONTEXT.md content."""
-        path = self.resolve_path(self.pipeline.product_context_path)
+        normalized = (product or "claimcoach").strip().lower()
+        path_str = self.pipeline.product_context_path
+        if normalized == "medbill":
+            path_str = getattr(
+                self.pipeline,
+                "medbill_product_context_path",
+                "reference/MEDBILL_PRODUCT_CONTEXT.md",
+            )
+        path = self.resolve_path(path_str)
+        if normalized == "medbill" and not path.exists():
+            sibling = self.resolve_path("../Medbill/reference/PRODUCT_CONTEXT.md")
+            if sibling.exists():
+                path = sibling
         if path.exists():
             return path.read_text()
         return ""

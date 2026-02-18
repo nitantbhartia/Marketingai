@@ -448,6 +448,7 @@ class Database:
     def query_articles(
         self,
         status: str | None = None,
+        product: str | None = None,
         writer_claim_empty: bool = False,
         limit: int = 100,
         order_by: str = "created_at ASC",
@@ -457,6 +458,9 @@ class Database:
         if status:
             conditions.append("status = ?")
             params.append(status)
+        if product:
+            conditions.append("COALESCE(product, 'claimcoach') = ?")
+            params.append(product)
         if writer_claim_empty:
             conditions.append("(writer_claim = '' OR writer_claim IS NULL)")
 
