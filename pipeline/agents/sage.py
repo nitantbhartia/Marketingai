@@ -40,7 +40,6 @@ FLAGGED_PHRASES = [
     "guaranteed results",
     "100% success rate",
     "guaranteed to get",
-    "you will receive",
     "we guarantee",
     "get thousands more",
     "recover thousands",
@@ -62,6 +61,13 @@ FLAGGED_PHRASES = [
     "status tracking",
     # Unverified data claims
     "average user recovers",
+]
+
+# Regex-only checks for claims that are risky in context.
+FLAGGED_REGEX = [
+    # Promissory outcome language (not generic future-tense narration)
+    r"\byou will receive (?:more|additional|extra|thousands)\b",
+    r"\bwill get you (?:more|additional|extra|thousands)\b",
 ]
 
 
@@ -1219,6 +1225,9 @@ Format each issue on its own line starting with "- "."""
         for phrase in FLAGGED_PHRASES:
             if phrase in content_lower:
                 issues.append(f"Flagged phrase: '{phrase}'")
+        for pattern in FLAGGED_REGEX:
+            if re.search(pattern, content_lower):
+                issues.append(f"Flagged pattern: /{pattern}/")
 
         if issues:
             return 0.0, issues
