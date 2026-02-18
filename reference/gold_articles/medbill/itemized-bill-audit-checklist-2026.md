@@ -6,7 +6,7 @@ Most savings happen before negotiation starts. If you skip the audit, you negoti
 
 An itemized audit converts a confusing invoice into a list of fixable, high-leverage lines.
 
-Run a pre-audit scan first: [BillScan](https://billscan.app).
+Run a pre-audit scan first: [BillScan](https://billkarma.app).
 
 ## The 10 Checks That Find the Most Dollars
 
@@ -94,7 +94,7 @@ Do not escalate without your matrix. It is your leverage artifact.
 
 <!-- TOOL:bill_error_checker:mini -->
 
-Automate your first-pass checklist here: [BillScan tools](https://billscan.app/tools).
+Automate your first-pass checklist here: [BillScan tools](https://billkarma.app/tools).
 
 ## Frequently Asked Questions
 
@@ -107,4 +107,4 @@ Results vary by bill type and error density, but audited disputes usually outper
 ### Should I dispute in writing even after a phone call?
 Yes. Calls move process; writing preserves leverage and escalation evidence.
 
-Do not pay blind. Audit first: [BillScan](https://billscan.app).
+Do not pay blind. Audit first: [BillScan](https://billkarma.app).

@@ -6,7 +6,7 @@ Anesthesia bills are not priced like normal office visits. They follow a unit fo
 
 If your number looks high, start by checking the math before you negotiate.
 
-Start with a line-item scan: [BillScan](https://billscan.app).
+Start with a line-item scan: [BillScan](https://billkarma.app).
 
 ## How Anesthesia Pricing Works
 
@@ -120,7 +120,7 @@ If any box is unchecked, keep dispute open before full payment.
 
 <!-- TOOL:surprise_bill_checker:mini -->
 
-Build the audit worksheet and dispute packet fast: [BillScan tools](https://billscan.app/tools).
+Build the audit worksheet and dispute packet fast: [BillScan tools](https://billkarma.app/tools).
 
 ## Frequently Asked Questions
 
@@ -133,4 +133,4 @@ Yes. Modifier-related unit additions can materially increase total charge when m
 ### What if I never selected the anesthesiologist?
 That is a core surprise-billing scenario. Validate whether federal protections apply and require recalculation where appropriate.
 
-Do not pay an anesthesia bill you have not unit-audited: [BillScan](https://billscan.app).
+Do not pay an anesthesia bill you have not unit-audited: [BillScan](https://billkarma.app).

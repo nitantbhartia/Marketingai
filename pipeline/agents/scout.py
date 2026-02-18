@@ -50,7 +50,7 @@ class ScoutAgent(BaseAgent):
             return {
                 "product": "medbill",
                 "brand": "BillScan",
-                "site_url": "https://billscan.app",
+                "site_url": "https://billkarma.app",
             }
         return {
             "product": "claimcoach",

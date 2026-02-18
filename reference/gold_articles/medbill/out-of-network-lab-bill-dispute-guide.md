@@ -8,7 +8,7 @@ Most lab-bill disputes fail because patients say “this seems wrong” instead 
 
 Use this as your step-by-step playbook.
 
-Start with a rapid line-item check: [Analyze your bill with BillScan](https://billscan.app).
+Start with a rapid line-item check: [Analyze your bill with BillScan](https://billkarma.app).
 
 ---
 
@@ -123,7 +123,7 @@ Always ask for written policy and supervisor escalation.
 
 Escalation works best when your evidence table is clean and chronological.
 
-Mid-process support: [Run your bill through BillScan](https://billscan.app) to prioritize the highest-leverage line items.
+Mid-process support: [Run your bill through BillScan](https://billkarma.app) to prioritize the highest-leverage line items.
 
 ---
 
@@ -174,7 +174,7 @@ An out-of-network lab bill dispute is a process, not one phone call.
 
 When you combine itemized review, network-context proof, written scripts, and structured escalation, your odds improve significantly.
 
-Start with evidence, then negotiate from strength: [Analyze your bill with BillScan](https://billscan.app).
+Start with evidence, then negotiate from strength: [Analyze your bill with BillScan](https://billkarma.app).
 
 <!-- TOOL:network_bill_checker:mini -->
 
@@ -182,7 +182,7 @@ Start with evidence, then negotiate from strength: [Analyze your bill with BillS
 META_DESCRIPTION: Out-of-network lab bill dispute guide for 2026. Validate network context, challenge line-item errors, and reduce surprise charges with a structured playbook.
 
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"Article","headline":"Out-of-Network Lab Bill Dispute in 2026: How to Reduce Surprise Charges (Without Guessing)","description":"Out-of-network lab bill dispute guide for 2026. Validate network context, challenge line-item errors, and reduce surprise charges with a structured playbook.","datePublished":"2026-02-17","dateModified":"2026-02-17","author":{"@type":"Organization","name":"ClaimCoach Editorial Team"},"publisher":{"@type":"Organization","name":"ClaimCoach","url":"https://billscan.app"},"mainEntityOfPage":"https://billscan.app"}
+{"@context":"https://schema.org","@type":"Article","headline":"Out-of-Network Lab Bill Dispute in 2026: How to Reduce Surprise Charges (Without Guessing)","description":"Out-of-network lab bill dispute guide for 2026. Validate network context, challenge line-item errors, and reduce surprise charges with a structured playbook.","datePublished":"2026-02-17","dateModified":"2026-02-17","author":{"@type":"Organization","name":"ClaimCoach Editorial Team"},"publisher":{"@type":"Organization","name":"ClaimCoach","url":"https://billkarma.app"},"mainEntityOfPage":"https://billkarma.app"}
 </script>
 
 <script type="application/ld+json">

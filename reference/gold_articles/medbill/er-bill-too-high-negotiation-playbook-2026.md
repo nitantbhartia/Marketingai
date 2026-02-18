@@ -6,7 +6,7 @@ Most ER billing negotiations fail because patients call with one sentence: "This
 
 That approach rarely moves numbers. What works is coding evidence, benchmark comparisons, and a structured ask.
 
-Start with a line-item scan: [BillScan](https://billscan.app).
+Start with a line-item scan: [BillScan](https://billkarma.app).
 
 ## Why ER Balances Inflate
 
@@ -99,7 +99,7 @@ Escalation works when your file is chronological and evidence-backed.
 
 <!-- TOOL:bill_error_checker:mini -->
 
-Prepare your dispute packet with guided prompts: [BillScan tools](https://billscan.app/tools).
+Prepare your dispute packet with guided prompts: [BillScan tools](https://billkarma.app/tools).
 
 ## Frequently Asked Questions
 
@@ -112,4 +112,4 @@ Yes. Negotiation can still apply to patient-responsibility balances, coding corr
 ### What gets quickest movement?
 Specific disputed lines, documented evidence, and a clear written correction request.
 
-Negotiate from evidence, not memory: [BillScan](https://billscan.app).
+Negotiate from evidence, not memory: [BillScan](https://billkarma.app).

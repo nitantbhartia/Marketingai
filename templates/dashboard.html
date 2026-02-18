@@ -18,6 +18,9 @@
                 </div>
                 <div class="header-actions">
                     <a class="btn btn-secondary" href="/seeds?product={{ product_filter if product_filter != 'all' else 'claimcoach' }}">Seed Library</a>
+                    {% if active_product_site %}
+                    <a class="btn btn-secondary" href="{{ active_product_site }}" target="_blank" rel="noopener">Open Site</a>
+                    {% endif %}
                     <button class="btn btn-secondary" onclick="refreshDashboard()">
                         <span class="icon">&#x21BB;</span> Refresh
                     </button>

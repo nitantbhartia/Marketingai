@@ -13,6 +13,9 @@
             <div class="logo"><h1>Seed Library</h1></div>
             <div class="header-actions">
                 <a class="btn btn-secondary" href="/?product={{ product_filter }}">Back to Dashboard</a>
+                {% if active_product_site %}
+                <a class="btn btn-secondary" href="{{ active_product_site }}" target="_blank" rel="noopener">Open Site</a>
+                {% endif %}
             </div>
         </div>
     </div>

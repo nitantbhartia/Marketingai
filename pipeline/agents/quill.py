@@ -915,9 +915,9 @@ SOURCES: source1, source2, source3"""
             return {
                 "product": "medbill",
                 "brand": "BillScan",
-                "domain": "billscan.app",
-                "site_url": "https://billscan.app",
-                "tools_url": "https://billscan.app/tools",
+                "domain": "billkarma.app",
+                "site_url": "https://billkarma.app",
+                "tools_url": "https://billkarma.app/tools",
             }
         return {
             "product": "claimcoach",

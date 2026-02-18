@@ -108,8 +108,8 @@ class EzraAgent(BaseAgent):
             return {
                 "product": "medbill",
                 "brand": "BillScan",
-                "site_url": "https://billscan.app",
-                "tools_url": "https://billscan.app/tools",
+                "site_url": "https://billkarma.app",
+                "tools_url": "https://billkarma.app/tools",
             }
         return {
             "product": "claimcoach",
@@ -366,7 +366,7 @@ class EzraAgent(BaseAgent):
 
         # 4) Product/domain consistency
         info = self._product_info(article)
-        wrong_domain = "billscan.app" if info["product"] == "claimcoach" else "claimcoach.app"
+        wrong_domain = "billkarma.app" if info["product"] == "claimcoach" else "claimcoach.app"
         if wrong_domain in lower:
             errors.append(f"Cross-product domain leak detected ({wrong_domain})")
 

@@ -66,6 +66,10 @@ templates = Jinja2Templates(directory=str(templates_dir))
 # Store recent notifications
 recent_notifications = []
 _SEED_ROOT = Path(__file__).parent / "reference" / "gold_articles"
+_PRODUCT_SITES = {
+    "claimcoach": "https://claimcoach.app",
+    "medbill": "https://billkarma.app",
+}
 
 
 def _load_roi_kpis() -> Dict[str, Any]:
@@ -186,6 +190,9 @@ async def dashboard(
             pass  # Table may not exist yet
 
         roi_kpis = _load_roi_kpis()
+        active_product_site = (
+            _PRODUCT_SITES.get(product_filter) if product_filter in _PRODUCT_SITES else None
+        )
 
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
@@ -193,6 +200,8 @@ async def dashboard(
             "status_counts": status_counts,
             "status_filter": status_filter or "all",
             "product_filter": product_filter,
+            "product_sites": _PRODUCT_SITES,
+            "active_product_site": active_product_site,
             "approval_threshold": approval_threshold,
             "max_revision_rounds": max_revision_rounds,
             "rate_limit_count": rate_limit_count,
@@ -587,7 +596,13 @@ async def seeds_page(request: Request, product: Optional[str] = None):
             seeds.append({"file": p.name, "title": title})
     return templates.TemplateResponse(
         "seeds.html",
-        {"request": request, "product_filter": product_filter, "seeds": seeds},
+        {
+            "request": request,
+            "product_filter": product_filter,
+            "seeds": seeds,
+            "product_sites": _PRODUCT_SITES,
+            "active_product_site": _PRODUCT_SITES.get(product_filter),
+        },
     )
 
 

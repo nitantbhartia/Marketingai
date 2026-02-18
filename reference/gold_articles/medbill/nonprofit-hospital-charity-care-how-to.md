@@ -6,7 +6,7 @@ Many patients never apply for charity care because they assume they earn too muc
 
 That assumption is expensive. Many nonprofit hospitals set partial-assistance tiers that still help moderate-income households.
 
-Check your likely eligibility first: [BillScan](https://billscan.app).
+Check your likely eligibility first: [BillScan](https://billkarma.app).
 
 ## What Charity Care Is (and Why It Matters)
 
@@ -101,7 +101,7 @@ Why this matters to your wallet: combining pathways can materially reduce final 
 
 <!-- TOOL:assistance_eligibility_quiz:mini -->
 
-Build your packet and follow-up plan here: [BillScan tools](https://billscan.app/tools).
+Build your packet and follow-up plan here: [BillScan tools](https://billkarma.app/tools).
 
 ## Frequently Asked Questions
 
@@ -114,4 +114,4 @@ Usually yes, but timing matters. Request holds quickly and submit a complete fil
 ### Is approval all or nothing?
 Not always. Partial reductions are common and still meaningful.
 
-Do not self-reject before checking: [BillScan](https://billscan.app).
+Do not self-reject before checking: [BillScan](https://billkarma.app).
