@@ -30,6 +30,8 @@ class MorganAgent(BaseAgent):
         checks["publishing_cadence"] = self._check_publishing_cadence()
         checks["social_amplification"] = self._check_social_amplification()
         checks["quality_trends"] = self._check_quality_trends()
+        checks["critical_rejections"] = self._check_critical_rejections()
+        checks["review_timeout"] = self._check_review_timeout()
         checks["refresh_queue"] = self._queue_decay_refreshes()
 
         # Distill cross-agent lessons from performance data
@@ -38,8 +40,9 @@ class MorganAgent(BaseAgent):
         # Meta-learning: is the learning system itself working?
         checks["learning_health"] = self._assess_learning_health()
 
-        # Release stale claim locks (agents that crashed mid-processing)
-        cleared = self.db.clear_stale_claims(hours=24)
+        # Release stale claim locks (agents that crashed mid-processing).
+        # 6h is sufficient — all normal write/review cycles finish in <2h.
+        cleared = self.db.clear_stale_claims(hours=6)
         if cleared:
             logger.info(f"Released {cleared} stale claim lock(s)")
             checks["stale_claims"] = {"cleared": cleared, "alert": f"{cleared} stale claim(s) released"}
@@ -180,6 +183,60 @@ class MorganAgent(BaseAgent):
             lines.append("- No actions needed — pipeline is healthy")
 
         return "\n".join(lines)
+
+    def _check_review_timeout(self) -> dict:
+        """Auto-promote articles stuck in REVIEW status for more than 48 hours.
+
+        REVIEW means Sage approved the article and it is waiting for a human
+        to click 'publish'. If no human acts within 48 h, Morgan promotes the
+        article to READY_TO_PUBLISH so Ezra can pick it up automatically.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+        stale_review = self.db.query_articles(
+            status=ArticleStatus.REVIEW.value, limit=50
+        )
+        promoted_ids: list[int] = []
+        for article in stale_review:
+            updated = article.updated_at or ""
+            if updated < cutoff:
+                self.db.update_article(
+                    article.id,
+                    status=ArticleStatus.READY_TO_PUBLISH.value,
+                )
+                promoted_ids.append(article.id)
+                logger.info(
+                    f"Auto-promoted article {article.id} from REVIEW to "
+                    f"READY_TO_PUBLISH after 48h timeout"
+                )
+
+        result: dict[str, Any] = {"auto_promoted": len(promoted_ids)}
+        if promoted_ids:
+            result["alert"] = (
+                f"{len(promoted_ids)} article(s) auto-promoted from REVIEW to "
+                "READY_TO_PUBLISH after 48h (no human action received)"
+            )
+            result["promoted_ids"] = promoted_ids
+        else:
+            result["status"] = "healthy"
+        return result
+
+    def _check_critical_rejections(self) -> dict:
+        """Alert when articles have been critically rejected this week.
+
+        Critical rejections (legal/product/state/factual violations that Quill
+        could not fix within the revision budget) require manual review.
+        """
+        week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        events = self.db.get_metrics(name="critical_rejection", since=week_ago)
+        result: dict[str, Any] = {"critical_rejections_this_week": len(events)}
+        if events:
+            result["alert"] = (
+                f"{len(events)} article(s) critically rejected this week — "
+                "legal/product/state/factual violations unresolved. Manual review needed."
+            )
+        else:
+            result["status"] = "healthy"
+        return result
 
     def _check_backlog(self) -> dict:
         """Are there enough topics in the backlog?"""

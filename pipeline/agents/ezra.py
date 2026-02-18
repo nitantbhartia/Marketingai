@@ -156,7 +156,13 @@ class EzraAgent(BaseAgent):
 
         if not article.title:
             self.logger.error(f"Article {article_id} has no title, cannot publish")
-            self.db.update_article(article_id, publisher_claim="")
+            self.db.update_article(
+                article_id,
+                publisher_claim="",
+                status=ArticleStatus.REVISION.value,
+                revision_notes=(article.revision_notes or "")
+                + "\n\n[EZRA] Cannot publish: article has no title. Quill must generate a title before re-submission.",
+            )
             return {
                 "article_id": article_id,
                 "success": False,
@@ -293,8 +299,15 @@ class EzraAgent(BaseAgent):
             }
 
         except Exception as e:
-            # Release claim on error
-            self.db.update_article(article_id, publisher_claim="")
+            # Release claim and send back for revision so the article is not
+            # silently orphaned in READY_TO_PUBLISH with no active claim.
+            self.db.update_article(
+                article_id,
+                publisher_claim="",
+                status=ArticleStatus.REVISION.value,
+                revision_notes=(article.revision_notes or "")
+                + f"\n\n[EZRA ERROR] Publish failed: {type(e).__name__}: {e}. Review and re-queue.",
+            )
             raise
 
     def _resolve_images(self, article):

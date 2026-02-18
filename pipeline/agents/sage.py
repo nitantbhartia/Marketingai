@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any
 
 import requests
@@ -100,8 +101,9 @@ class SageAgent(BaseAgent):
                     result = self._review_article(article)
                 results.append(result)
             except RateLimitError as e:
-                # Rate limit — release the claim but keep status as
-                # EDITOR_REVIEW so Sage picks it up again on the next run.
+                # Rate limit — release the claim, pause to let quota recover,
+                # then stop this run entirely. The scheduler will retry Sage
+                # on its normal cadence rather than hammering the API.
                 logger.warning(
                     f"Rate limited reviewing article {article.id}: {e}"
                 )
@@ -109,6 +111,8 @@ class SageAgent(BaseAgent):
                 self.db.record_metric("rate_limit", 0, json.dumps({
                     "agent": "sage", "article_id": article.id,
                 }))
+                time.sleep(30)
+                break
             except Exception as e:
                 logger.error(
                     f"Error reviewing article {article.id}: {e}", exc_info=True
@@ -530,6 +534,18 @@ class SageAgent(BaseAgent):
             update_kwargs["revision_notes"] = revision_notes
 
         self.db.update_article(article.id, **update_kwargs)
+
+        # Surface critical rejections so Morgan can alert operators immediately.
+        if decision == "rejected" and has_critical:
+            self.db.record_metric(
+                "critical_rejection",
+                1,
+                json.dumps({
+                    "article_id": article.id,
+                    "title": article.title,
+                    "reasons": critical_reasons,
+                }),
+            )
 
         # Record generalizable lessons for other agents
         self._record_lessons(scores, all_issues, decision, article)

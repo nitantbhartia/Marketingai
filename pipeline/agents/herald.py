@@ -127,27 +127,33 @@ class HeraldAgent(BaseAgent):
         """Generate social content for an article and post/draft it."""
         results = {"article_id": article.id, "title": article.title, "posts": []}
 
-        # Generate social content using LLM (Anthropic or Gemini)
-        if self.has_llm:
-            social_content = self._generate_social_content(article)
-        else:
-            social_content = self._template_social_content(article)
+        try:
+            # Generate social content using LLM (Anthropic or Gemini)
+            if self.has_llm:
+                social_content = self._generate_social_content(article)
+            else:
+                social_content = self._template_social_content(article)
 
-        # Reddit promotion
-        reddit_result = self._promote_reddit(article, social_content.get("reddit", ""))
-        results["posts"].append(reddit_result)
+            # Reddit promotion
+            reddit_result = self._promote_reddit(article, social_content.get("reddit", ""))
+            results["posts"].append(reddit_result)
 
-        # Twitter/X promotion
-        twitter_result = self._promote_twitter(article, social_content.get("twitter", ""))
-        results["posts"].append(twitter_result)
+            # Twitter/X promotion
+            twitter_result = self._promote_twitter(article, social_content.get("twitter", ""))
+            results["posts"].append(twitter_result)
 
-        # Update article social status
-        self.db.update_article(
-            article.id,
-            social_status="amplified",
-            status=ArticleStatus.AMPLIFIED.value,
-            herald_claim="",
-        )
+            # Update article social status
+            self.db.update_article(
+                article.id,
+                social_status="amplified",
+                status=ArticleStatus.AMPLIFIED.value,
+                herald_claim="",
+            )
+        except Exception:
+            # Ensure claim is always released even if promotion fails midway,
+            # so the article is not left with a stale herald_claim.
+            self.db.update_article(article.id, herald_claim="")
+            raise
 
         return results
 
