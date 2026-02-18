@@ -17,6 +17,13 @@ Low offers often trace to four operational patterns:
 - Condition scoring is broad and weakly documented
 - Reimbursable components are omitted or minimized
 
+**Georgia's total loss threshold** is governed by **O.C.G.A. § 40-3-4(a)(3)**: a vehicle is a total loss when repair costs equal or exceed **75% of its pre-loss ACV**. Insurer claims handling obligations — including prompt payment and written documentation requirements — fall under **O.C.G.A. § 33-34-6** (Georgia's Unfair Claims Settlement Practices Act) and Georgia Insurance Rule **120-2-22-.02**.
+
+Sources:
+- [O.C.G.A. § 40-3-4 — Certificates of title; definitions](https://law.justia.com/codes/georgia/title-40/chapter-3/article-1/section-40-3-4/)
+- [O.C.G.A. § 33-34-6 — Motor Vehicle Accident Reparations](https://law.justia.com/codes/georgia/title-33/chapter-34/section-33-34-6/)
+- [Georgia Office of Commissioner of Insurance](https://oci.georgia.gov/)
+
 Why this matters to your wallet: each unchallenged line can remove hundreds. Together they can remove thousands.
 
 ## The 5-Document Packet That Moves the Number
@@ -70,11 +77,14 @@ This cadence prevents indefinite delay loops.
 
 - Ask for supervisor valuation review
 - Require specific rebuttal for each disputed adjustment
-- File complaint with documented timeline if process stalls
+- File complaint with documented timeline if process stalls — [file with Georgia OCI online](https://oci.georgia.gov/consumer-services/file-complaint)
 - Consider appraisal/counsel where policy and dispute scope support it
 
-Source:
-- [Georgia Office of Commissioner of Insurance](https://oci.georgia.gov/)
+**Georgia OCI complaint timeline:** The Office of Commissioner of Insurance typically responds to consumer complaints within **15–20 business days**. Complaints are forwarded to the insurer's compliance department, which carries more weight than a standard escalation call. Reference your dispute timeline and O.C.G.A. § 33-34-6 obligations in your complaint text.
+
+Sources:
+- [Georgia Office of Commissioner of Insurance — File a Complaint](https://oci.georgia.gov/consumer-services/file-complaint)
+- [O.C.G.A. § 33-34-6 — Motor Vehicle Accident Reparations](https://law.justia.com/codes/georgia/title-33/chapter-34/section-33-34-6/)
 
 ## Georgia Dispute Quality Control Checklist
 
@@ -111,3 +121,15 @@ Comparable quality, trim accuracy, and explicit line-item correction tables.
 No. Use written disputes so escalation has a clean record.
 
 Do not accept an untested number: [run your settlement review](https://claimcoach.app).
+
+<!-- SEO_META_START -->
+META_DESCRIPTION: Georgia total loss offer too low? Use O.C.G.A. § 40-3-4's 75% threshold + this 14-day dispute runbook to correct low ACV and recover missing line items.
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Article","headline":"Georgia Total Loss Offer Too Low? Use This 2026 Dispute Runbook","description":"Georgia total loss offer too low? Use O.C.G.A. § 40-3-4's 75% threshold + this 14-day dispute runbook to correct low ACV and recover missing line items.","datePublished":"2026-02-18","dateModified":"2026-02-18","author":{"@type":"Organization","name":"ClaimCoach Editorial Team"},"publisher":{"@type":"Organization","name":"ClaimCoach","url":"https://claimcoach.app"},"mainEntityOfPage":"https://claimcoach.app"}
+</script>
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is the first Georgia total loss offer final?","acceptedAnswer":{"@type":"Answer","text":"No. Under O.C.G.A. § 33-34-6, insurers must handle claims fairly and promptly. First offers are frequently revised when you document material input errors with corrected comparables and a written delta table."}},{"@type":"Question","name":"What evidence gets the biggest movement on a Georgia total loss dispute?","acceptedAnswer":{"@type":"Answer","text":"Comparable quality, trim accuracy, and explicit line-item correction tables. Each disputed adjustment needs an exhibit — not just a number."}},{"@type":"Question","name":"Should I dispute a Georgia total loss offer by phone only?","acceptedAnswer":{"@type":"Answer","text":"No. Use written disputes so escalation has a clean record. If responses stay generic, file with the Georgia OCI — they typically respond within 15-20 business days."}}]}
+</script>
+<!-- SEO_META_END -->
