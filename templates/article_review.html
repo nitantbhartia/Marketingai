@@ -185,7 +185,7 @@
                                         <strong>{{ event.agent_name }}</strong>
                                         <span class="timeline-action">{{ event.action }}</span>
                                     </div>
-                                    <div class="timeline-time">{{ event.created_at }}</div>
+                                    <div class="timeline-time" title="{{ event.created_at }}">{{ event.created_at|humants }}</div>
                                     {% if event.details %}
                                     <div class="timeline-details">
                                         {{ event.details if event.details is string else event.details|tojson }}
@@ -380,16 +380,16 @@
                         <div class="timestamp-list">
                             <div class="timestamp-item">
                                 <span class="timestamp-label">Created</span>
-                                <span class="timestamp-value">{{ article.created_at }}</span>
+                                <span class="timestamp-value" title="{{ article.created_at }}">{{ article.created_at|humants }}</span>
                             </div>
                             <div class="timestamp-item">
                                 <span class="timestamp-label">Last Updated</span>
-                                <span class="timestamp-value">{{ article.updated_at }}</span>
+                                <span class="timestamp-value" title="{{ article.updated_at }}">{{ article.updated_at|humants }}</span>
                             </div>
                             {% if article.published_at %}
                             <div class="timestamp-item">
                                 <span class="timestamp-label">Published</span>
-                                <span class="timestamp-value">{{ article.published_at }}</span>
+                                <span class="timestamp-value" title="{{ article.published_at }}">{{ article.published_at|humants }}</span>
                             </div>
                             {% endif %}
                         </div>

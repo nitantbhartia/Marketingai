@@ -348,7 +348,7 @@
 
                         <div class="article-footer">
                             <div class="article-timestamp">
-                                Updated: {{ article.updated_at }}
+                                Updated: <span title="{{ article.updated_at }}">{{ article.updated_at|humants }}</span>
                             </div>
                             <div class="article-id">
                                 ID: {{ article.id }}
@@ -381,7 +381,7 @@
                             <div class="notification-meta">
                                 Status: {{ notification.data.status }} &middot;
                                 SEO: {{ notification.data.get('seo_score', 'N/A') }} &middot;
-                                {{ notification.timestamp }}
+                                {{ notification.timestamp|humants }}
                             </div>
                         </div>
                         <a href="/article/{{ notification.data.article_id }}" class="btn btn-sm btn-secondary">

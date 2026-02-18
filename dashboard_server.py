@@ -73,6 +73,64 @@ _PRODUCT_SITES = {
 }
 
 
+def _parse_timestamp(value: Any) -> Optional[datetime]:
+    """Parse DB/API timestamp formats into timezone-aware datetime."""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        dt = None
+    if dt is None:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                dt = datetime.strptime(raw, fmt)
+                break
+            except Exception:
+                continue
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone()
+
+
+def _relative_time(dt: datetime) -> str:
+    now = datetime.now(dt.tzinfo or timezone.utc)
+    delta = now - dt
+    seconds = max(0, int(delta.total_seconds()))
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days = hours // 24
+    if days < 30:
+        return f"{days}d ago"
+    months = days // 30
+    if months < 12:
+        return f"{months}mo ago"
+    years = days // 365
+    return f"{years}y ago"
+
+
+def _human_timestamp(value: Any) -> str:
+    dt = _parse_timestamp(value)
+    if not dt:
+        return str(value or "—")
+    formatted = dt.strftime("%b %d, %Y %I:%M %p").replace(" 0", " ")
+    return f"{formatted} · {_relative_time(dt)}"
+
+
+templates.env.filters["humants"] = _human_timestamp
+
+
 def _get_generation_pause_state() -> Dict[str, Any]:
     """Resolve generation pause state from env/DB/config, in that order."""
     env_val = os.getenv("PIPELINE_PAUSE_GENERATION")
