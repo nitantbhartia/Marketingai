@@ -435,6 +435,18 @@ body {
     color: var(--gray-700);
 }
 
+.pause-badge-live {
+    background: #d1fae5;
+    color: #065f46;
+    font-weight: 600;
+}
+
+.pause-badge-paused {
+    background: #fee2e2;
+    color: #991b1b;
+    font-weight: 600;
+}
+
 .badge-revision-round {
     background: var(--warning);
     color: #fff;

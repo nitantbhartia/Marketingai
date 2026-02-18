@@ -17,6 +17,17 @@
                     <h1>MarketingAI Review Dashboard</h1>
                 </div>
                 <div class="header-actions">
+                    <button
+                        id="pauseToggleBtn"
+                        class="btn {{ 'btn-success' if generation_pause and generation_pause.paused else 'btn-warning' }}"
+                        onclick="toggleGenerationPause(event)"
+                        title="Pause or resume all generation/review/publish agents"
+                    >
+                        {{ 'Resume Generation' if generation_pause and generation_pause.paused else 'Pause Generation' }}
+                    </button>
+                    <span id="pauseStateBadge" class="state-badge {{ 'pause-badge-paused' if generation_pause and generation_pause.paused else 'pause-badge-live' }}">
+                        {{ 'Paused' if generation_pause and generation_pause.paused else 'Live' }}
+                    </span>
                     <a class="btn btn-secondary" href="/seeds?product={{ product_filter if product_filter != 'all' else 'claimcoach' }}">Seed Library</a>
                     {% if active_product_site %}
                     <a class="btn btn-secondary" href="{{ active_product_site }}" target="_blank" rel="noopener">Open Site</a>

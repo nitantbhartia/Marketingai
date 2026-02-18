@@ -261,6 +261,57 @@ async function promoteToSeed() {
     }
 }
 
+function applyPauseState(state) {
+    const pauseBtn = document.getElementById('pauseToggleBtn');
+    const pauseBadge = document.getElementById('pauseStateBadge');
+    if (!pauseBtn || !pauseBadge || !state) return;
+
+    const paused = !!state.paused;
+    pauseBtn.classList.remove('btn-success', 'btn-warning');
+    pauseBtn.classList.add(paused ? 'btn-success' : 'btn-warning');
+    pauseBtn.textContent = paused ? 'Resume Generation' : 'Pause Generation';
+    pauseBadge.textContent = paused ? 'Paused' : 'Live';
+    pauseBadge.classList.remove('pause-badge-live', 'pause-badge-paused');
+    pauseBadge.classList.add(paused ? 'pause-badge-paused' : 'pause-badge-live');
+}
+
+async function loadGenerationPauseState() {
+    const pauseBtn = document.getElementById('pauseToggleBtn');
+    if (!pauseBtn) return;
+    try {
+        const state = await apiRequest(`${API_BASE}/api/pipeline/pause`);
+        applyPauseState(state);
+    } catch (error) {
+        console.error('Failed to load pause state:', error);
+    }
+}
+
+async function toggleGenerationPause(event) {
+    const pauseBtn = document.getElementById('pauseToggleBtn');
+    const pauseBadge = document.getElementById('pauseStateBadge');
+    if (!pauseBtn || !pauseBadge) return;
+
+    const currentlyPaused = (pauseBadge.textContent || '').trim().toLowerCase() === 'paused';
+    const nextPaused = !currentlyPaused;
+    showLoading(pauseBtn);
+    try {
+        const result = await apiRequest(
+            `${API_BASE}/api/pipeline/pause`,
+            'POST',
+            { paused: nextPaused, reason: 'dashboard_toggle' }
+        );
+        applyPauseState(result);
+        showToast(
+            nextPaused ? 'Generation paused across Scout/Quill/Sage/Ezra' : 'Generation resumed',
+            'success'
+        );
+    } catch (error) {
+        showToast(`Error updating generation pause: ${error.message}`, 'error');
+    } finally {
+        hideLoading(pauseBtn);
+    }
+}
+
 // ── Pipeline Control Functions ─────────────────────────────
 
 const PIPELINE_STEPS = ['scout', 'brief-topics', 'promote', 'quill', 'sage'];
@@ -529,6 +580,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (activeBtn) {
         activeBtn.classList.add('active');
     }
+
+    loadGenerationPauseState();
 
     console.log('ClaimCoach Dashboard initialized');
 });

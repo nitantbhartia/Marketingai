@@ -6,6 +6,7 @@ Receives POST notifications when articles are ready for review.
 """
 
 import json
+import os
 import threading
 import traceback
 import uuid
@@ -70,6 +71,41 @@ _PRODUCT_SITES = {
     "claimcoach": "https://claimcoach.app",
     "medbill": "https://billkarma.app",
 }
+
+
+def _get_generation_pause_state() -> Dict[str, Any]:
+    """Resolve generation pause state from env/DB/config, in that order."""
+    env_val = os.getenv("PIPELINE_PAUSE_GENERATION")
+    if env_val is not None:
+        paused = env_val.strip().lower() in {"1", "true", "yes", "on"}
+        return {"paused": paused, "source": "env"}
+
+    try:
+        from pipeline.config import Config
+        from pipeline.db import Database
+
+        cfg = Config.load()
+        pdb = Database(cfg.resolve_path(cfg.pipeline.database_path))
+        rows = pdb.get_metrics(name="pipeline_pause", limit=1)
+        if rows:
+            row = rows[0]
+            paused = bool(float(row.metric_value or 0.0) > 0.0)
+            details = row.details or ""
+            if details:
+                try:
+                    payload = json.loads(details)
+                    if "paused" in payload:
+                        paused = bool(payload.get("paused"))
+                except Exception:
+                    pass
+            return {"paused": paused, "source": "dashboard_override"}
+
+        return {
+            "paused": bool(getattr(cfg.pipeline, "pause_generation", False)),
+            "source": "config",
+        }
+    except Exception:
+        return {"paused": True, "source": "fallback_safe"}
 
 
 def _load_roi_kpis() -> Dict[str, Any]:
@@ -206,6 +242,7 @@ async def dashboard(
             "max_revision_rounds": max_revision_rounds,
             "rate_limit_count": rate_limit_count,
             "roi_kpis": roi_kpis,
+            "generation_pause": _get_generation_pause_state(),
             "recent_notifications": recent_notifications[-10:],  # Last 10
             "now": datetime.now()
         })
@@ -559,8 +596,45 @@ async def get_stats(product: Optional[str] = None):
         "recent_activity": recent_activity,
         "scores": scores,
         "roi_kpis": _load_roi_kpis(),
-        "notifications_count": len(recent_notifications)
+        "notifications_count": len(recent_notifications),
+        "generation_pause": _get_generation_pause_state(),
     }
+
+
+@app.get("/api/pipeline/pause")
+async def get_pipeline_pause():
+    """Get current global generation pause state."""
+    return _get_generation_pause_state()
+
+
+@app.post("/api/pipeline/pause")
+async def set_pipeline_pause(request: Request):
+    """Set runtime generation pause state (persisted in pipeline_metrics)."""
+    payload = await request.json()
+    paused = bool(payload.get("paused", True))
+    reason = str(payload.get("reason", "dashboard_toggle")).strip()[:120]
+    try:
+        from pipeline.config import Config
+        from pipeline.db import Database
+
+        cfg = Config.load()
+        pdb = Database(cfg.resolve_path(cfg.pipeline.database_path))
+        pdb.record_metric(
+            "pipeline_pause",
+            1.0 if paused else 0.0,
+            json.dumps(
+                {
+                    "paused": paused,
+                    "reason": reason,
+                    "source": "dashboard",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            ),
+        )
+        state = _get_generation_pause_state()
+        return {"success": True, **state}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _safe_seed_path(product: str, filename: str) -> Path:
