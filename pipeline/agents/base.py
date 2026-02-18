@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
 import threading
 import time
@@ -150,6 +151,13 @@ class BaseAgent(ABC):
         self.db.record_metric(
             "llm_call", details["cost_estimate_usd"], details=json.dumps(details)
         )
+
+    def generation_paused(self) -> bool:
+        """Global emergency pause for content generation/review/publish flow."""
+        env_val = os.getenv("PIPELINE_PAUSE_GENERATION")
+        if env_val is not None:
+            return env_val.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(getattr(self.config.pipeline, "pause_generation", False))
 
     @property
     def provider(self) -> str:

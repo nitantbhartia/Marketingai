@@ -83,6 +83,9 @@ class SageAgent(BaseAgent):
 
     def run(self) -> dict[str, Any]:
         """Auto-score articles in 'editor_review' status."""
+        if self.generation_paused():
+            logger.warning("Generation is globally paused; Sage is skipping run.")
+            return {"status": "paused", "reviewed": 0}
         # Load performance lessons to calibrate scoring thresholds
         self._calibration = self._load_calibration()
 

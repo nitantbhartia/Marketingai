@@ -356,6 +356,9 @@ class QuillAgent(BaseAgent):
         at least 1 slot is always reserved for new TODO articles.  This
         prevents revision loops from starving the pipeline of fresh content.
         """
+        if self.generation_paused():
+            logger.warning("Generation is globally paused; Quill is skipping run.")
+            return {"status": "paused", "written": 0}
         recovered = self._recover_stale_in_progress()
         now = datetime.now(timezone.utc)
         start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()

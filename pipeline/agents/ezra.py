@@ -61,6 +61,9 @@ class EzraAgent(BaseAgent):
 
     def run(self) -> dict[str, Any]:
         """Find and publish ready articles."""
+        if self.generation_paused():
+            self.logger.warning("Generation is globally paused; Ezra is skipping run.")
+            return {"status": "paused", "published": 0, "skipped": 0, "failed": 0}
 
         self.logger.info("Looking for articles to publish...")
 

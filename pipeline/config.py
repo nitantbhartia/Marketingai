@@ -109,6 +109,7 @@ class TwitterConfig:
 
 @dataclass
 class PipelineSettings:
+    pause_generation: bool = True
     database_path: str = "pipeline.db"
     product_context_path: str = "reference/PRODUCT_CONTEXT.md"
     medbill_product_context_path: str = "reference/MEDBILL_PRODUCT_CONTEXT.md"

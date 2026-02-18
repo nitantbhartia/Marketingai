@@ -54,6 +54,7 @@ openai:
 
 # Pipeline settings
 pipeline:
+  pause_generation: true
   database_path: "pipeline.db"
   product_context_path: "reference/PRODUCT_CONTEXT.md"
   medbill_product_context_path: "reference/MEDBILL_PRODUCT_CONTEXT.md"

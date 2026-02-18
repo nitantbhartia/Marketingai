@@ -60,6 +60,9 @@ class ScoutAgent(BaseAgent):
 
     def run(self) -> dict[str, Any]:
         """Research topics and populate backlog."""
+        if self.generation_paused():
+            logger.warning("Generation is globally paused; Scout is skipping run.")
+            return {"status": "paused", "created": 0, "discovered": 0}
         existing_count = self.db.count_articles(ArticleStatus.BACKLOG.value)
         logger.info(f"Current backlog: {existing_count} topics")
 
