@@ -413,7 +413,7 @@ class SageAgent(BaseAgent):
         all_issues.extend(wc_issues)
 
         # 7. CTA quality (5 pts — placement-aware)
-        cta_score, cta_issues = self._check_cta(content)
+        cta_score, cta_issues = self._check_cta(content, article)
         scores["cta"] = {"score": cta_score, "max": 5, "issues": cta_issues}
         total_score += cta_score
         all_issues.extend(cta_issues)
@@ -884,11 +884,11 @@ Format each issue on its own line starting with "- "."""
         last = content[-1000:]
         return f"{first}\n\n[... middle section ...]\n\n{middle}\n\n[... end section ...]\n\n{last}"
 
-    def _check_cta(self, content: str) -> tuple[float, list[str]]:
-        """Check for ClaimCoach CTA — conversion-focused 3-CTA scoring.
+    def _check_cta(self, content: str, article) -> tuple[float, list[str]]:
+        """Check for product CTA — conversion-focused 3-CTA scoring.
 
         Scores for presence, early placement, and distribution:
-        - ClaimCoach linked (not just mentioned) (1 pt)
+        - Product linked (not just mentioned) (1 pt)
         - Early CTA within first 300 words (1.5 pts)
         - 3 CTA links spread across the article (1.5 pts)
         - Benefit-driven CTA copy, not just brand mention (1 pt)
@@ -897,20 +897,26 @@ Format each issue on its own line starting with "- "."""
         score = 0.0
 
         content_lower = content.lower()
+        product = (getattr(article, "product", "") or "claimcoach").strip().lower()
+        if product == "medbill":
+            brand = "BillKarma"
+            domain = "billkarma.app"
+        else:
+            brand = "ClaimCoach"
+            domain = "claimcoach.app"
+        brand_lower = brand.lower()
 
         # Find all CTA link positions
-        cta_links = [
-            m.start() for m in re.finditer(r"claimcoach\.app", content_lower)
-        ]
+        cta_links = [m.start() for m in re.finditer(re.escape(domain), content_lower)]
 
-        # 1 pt: At least one linked CTA (claimcoach.app, not just brand name)
+        # 1 pt: At least one linked CTA (product domain, not just brand name)
         if cta_links:
             score += 1
-        elif "claimcoach" in content_lower:
-            issues.append("ClaimCoach mentioned but no link to claimcoach.app")
+        elif brand_lower in content_lower:
+            issues.append(f"{brand} mentioned but no link to {domain}")
             # Still check benefit copy below, but other placement checks need links
         else:
-            issues.append("No mention of ClaimCoach — need 3 CTAs linking to claimcoach.app")
+            issues.append(f"No mention of {brand} — need 3 CTAs linking to {domain}")
             return score, issues
 
         # 1.5 pts: Early CTA within first 300 words
@@ -948,11 +954,11 @@ Format each issue on its own line starting with "- "."""
 
         # 1 pt: Benefit-driven CTA copy (not just brand name)
         benefit_patterns = [
-            r"claimcoach\s+(?:analyzes?|shows?|helps?|identifies?|checks?)",
-            r"(?:try|use|check out|visit|get started with)\s+claimcoach",
-            r"claimcoach\.app\)?\s*(?:to|and|—|–|-)\s+\w+",
-            r"(?:see|find|check)\s+(?:what|which|how).*claimcoach",
-            r"claimcoach.*(?:free|minutes?|automatically)",
+            rf"{re.escape(brand_lower)}\s+(?:analyzes?|shows?|helps?|identifies?|checks?|audits?|flags?)",
+            rf"(?:try|use|check out|visit|get started with)\s+{re.escape(brand_lower)}",
+            rf"{re.escape(domain)}\)?\s*(?:to|and|—|–|-)\s+\w+",
+            rf"(?:see|find|check)\s+(?:what|which|how).*{re.escape(brand_lower)}",
+            rf"{re.escape(brand_lower)}.*(?:free|minutes?|automatically)",
         ]
         has_benefit = any(
             re.search(p, content_lower) for p in benefit_patterns
@@ -960,7 +966,7 @@ Format each issue on its own line starting with "- "."""
         if has_benefit:
             score += 1
         else:
-            issues.append("CTA mentions ClaimCoach but lacks benefit copy (explain what it does for the reader)")
+            issues.append(f"CTA mentions {brand} but lacks benefit copy (explain what it does for the reader)")
 
         return score, issues
 
