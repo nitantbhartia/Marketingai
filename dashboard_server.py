@@ -133,35 +133,13 @@ templates.env.filters["humants"] = _human_timestamp
 
 def _get_generation_pause_state() -> Dict[str, Any]:
     """Resolve generation pause state from env/DB/config, in that order."""
-    env_val = os.getenv("PIPELINE_PAUSE_GENERATION")
-    if env_val is not None:
-        paused = env_val.strip().lower() in {"1", "true", "yes", "on"}
-        return {"paused": paused, "source": "env"}
-
     try:
-        from pipeline.config import Config
+        from pipeline.config import Config, resolve_generation_pause
         from pipeline.db import Database
 
         cfg = Config.load()
         pdb = Database(cfg.resolve_path(cfg.pipeline.database_path))
-        rows = pdb.get_metrics(name="pipeline_pause", limit=1)
-        if rows:
-            row = rows[0]
-            paused = bool(float(row.metric_value or 0.0) > 0.0)
-            details = row.details or ""
-            if details:
-                try:
-                    payload = json.loads(details)
-                    if "paused" in payload:
-                        paused = bool(payload.get("paused"))
-                except Exception:
-                    pass
-            return {"paused": paused, "source": "dashboard_override"}
-
-        return {
-            "paused": bool(getattr(cfg.pipeline, "pause_generation", False)),
-            "source": "config",
-        }
+        return resolve_generation_pause(db=pdb, pipeline_settings=cfg.pipeline)
     except Exception:
         return {"paused": True, "source": "fallback_safe"}
 

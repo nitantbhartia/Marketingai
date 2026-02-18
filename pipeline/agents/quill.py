@@ -522,22 +522,9 @@ class QuillAgent(BaseAgent):
         """Count successful Quill writes since UTC midnight."""
         now = datetime.now(timezone.utc)
         start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-        metrics = self.db.get_metrics(name="quill_write", since=start_of_day, limit=2000)
-        if not product:
-            return len(metrics)
-        normalized = product.strip().lower()
-        count = 0
-        for metric in metrics:
-            details = metric.details or ""
-            if not details:
-                continue
-            try:
-                payload = json.loads(details)
-            except Exception:
-                continue
-            if (payload.get("product") or "claimcoach").strip().lower() == normalized:
-                count += 1
-        return count
+        return self.db.count_metrics(
+            name="quill_write", since=start_of_day, product=product
+        )
 
     # ------------------------------------------------------------------
     # Single-article pipeline (called in a loop by run())
@@ -2084,9 +2071,10 @@ Article:
         content, freshness_fixes = auto_fix_stale_years(content)
         if freshness_fixes > 0:
             fixes.append(f"fixed_{freshness_fixes}_stale_year_references")
-        if "2026" not in content:
+        current_year = str(datetime.now(timezone.utc).year)
+        if current_year not in content:
             para_break = content.find("\n\n")
-            freshness_line = "As of 2026, verify your state and insurer rules before sending your dispute."
+            freshness_line = f"As of {current_year}, verify your state and insurer rules before sending your dispute."
             if para_break > 0:
                 content = content[:para_break] + "\n\n" + freshness_line + content[para_break:]
             else:
@@ -2704,21 +2692,75 @@ Article:
 
         return "".join(result_parts)
 
-    def _generate_faq_block(self, article) -> str:
-        """Generate a deterministic FAQ section without extra LLM cost."""
-        keyword = (article.target_keyword or "this topic").strip()
-        faq = (
-            "## Frequently Asked Questions\n\n"
-            f"### What is the first step if I'm dealing with {keyword}?\n\n"
-            "Start by collecting the documents that support your position and writing down the exact line items you dispute. "
-            "A clear paper trail usually gives you more leverage than a phone-only conversation.\n\n"
-            f"### How long does a typical {keyword} dispute take?\n\n"
+    # FAQ question/answer templates — rotated based on keyword hash to avoid
+    # duplicate content across articles while staying deterministic.
+    _FAQ_TEMPLATES = [
+        (
+            "What is the first step if I'm dealing with {kw}?",
+            "Start by collecting the documents that support your position and writing down the exact "
+            "line items you dispute. A clear paper trail usually gives you more leverage than a "
+            "phone-only conversation.",
+        ),
+        (
+            "How long does a typical {kw} dispute take?",
             "Simple corrections can resolve in days, while formal disputes can take several weeks. "
-            "Keep follow-ups in writing so delays are documented.\n\n"
-            f"### What if the first response on {keyword} is a denial?\n\n"
-            "Ask for the denial reason in writing, attach your evidence, and escalate to a supervisor or regulator if needed. "
-            "A specific counter-response is usually stronger than a generic complaint.\n"
-        )
+            "Keep follow-ups in writing so delays are documented.",
+        ),
+        (
+            "What if the first response on {kw} is a denial?",
+            "Ask for the denial reason in writing, attach your evidence, and escalate to a supervisor "
+            "or regulator if needed. A specific counter-response is usually stronger than a generic complaint.",
+        ),
+        (
+            "Do I need a lawyer for {kw}?",
+            "Many disputes resolve without legal help, especially when you present organized evidence. "
+            "If the amount at stake is large or the process stalls, a consultation with an attorney can "
+            "clarify your options.",
+        ),
+        (
+            "What documents should I gather for {kw}?",
+            "Collect every relevant bill, explanation of benefits, policy excerpt, and written correspondence. "
+            "Organize them by date so you can quickly reference specifics during calls or letters.",
+        ),
+        (
+            "Can I dispute {kw} after the deadline?",
+            "Deadlines vary by state and insurer. Some allow late disputes with good cause, but acting "
+            "quickly improves your chances. Check your policy or state regulator website for specifics.",
+        ),
+        (
+            "How do I escalate a {kw} complaint?",
+            "If the company's internal process hasn't resolved your issue, file a complaint with your "
+            "state's insurance department or consumer protection office. Include copies of all prior correspondence.",
+        ),
+        (
+            "What mistakes should I avoid with {kw}?",
+            "Avoid accepting the first offer without reviewing it, missing written deadlines, or relying "
+            "solely on phone conversations. Always confirm agreements in writing.",
+        ),
+    ]
+
+    def _generate_faq_block(self, article) -> str:
+        """Generate a deterministic FAQ section with keyword-based variation."""
+        keyword = (article.target_keyword or "this topic").strip()
+        # Use keyword hash to rotate which 3 Q&A pairs are selected, so each
+        # article gets a unique combination while staying fully deterministic.
+        seed = sum(ord(c) for c in keyword.lower())
+        n = len(self._FAQ_TEMPLATES)
+        indices = [(seed + i) % n for i in range(3)]
+        # Ensure 3 distinct indices
+        seen = set()
+        selected = []
+        for idx in indices:
+            while idx in seen:
+                idx = (idx + 1) % n
+            seen.add(idx)
+            selected.append(idx)
+
+        parts = ["## Frequently Asked Questions\n"]
+        for idx in selected:
+            question, answer = self._FAQ_TEMPLATES[idx]
+            parts.append(f"\n### {question.format(kw=keyword)}\n\n{answer.format(kw=keyword)}\n")
+        faq = "\n".join(parts)
         return faq if self._validate_faq_structure(faq) else ""
 
     @staticmethod

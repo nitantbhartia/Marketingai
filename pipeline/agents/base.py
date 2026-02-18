@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from pipeline.config import Config
+from pipeline.config import Config, resolve_generation_pause
 from pipeline.db import Database
 
 # Module-level rate limiter shared across all agents in the same process.
@@ -154,25 +154,10 @@ class BaseAgent(ABC):
 
     def generation_paused(self) -> bool:
         """Global emergency pause for content generation/review/publish flow."""
-        env_val = os.getenv("PIPELINE_PAUSE_GENERATION")
-        if env_val is not None:
-            return env_val.strip().lower() in {"1", "true", "yes", "on"}
-        try:
-            rows = self.db.get_metrics(name="pipeline_pause", limit=1)
-            if rows:
-                row = rows[0]
-                details = row.details or ""
-                if details:
-                    try:
-                        payload = json.loads(details)
-                        if "paused" in payload:
-                            return bool(payload.get("paused"))
-                    except Exception:
-                        pass
-                return bool(float(row.metric_value or 0.0) > 0.0)
-        except Exception:
-            pass
-        return bool(getattr(self.config.pipeline, "pause_generation", False))
+        state = resolve_generation_pause(
+            db=self.db, pipeline_settings=self.config.pipeline
+        )
+        return state["paused"]
 
     @property
     def provider(self) -> str:

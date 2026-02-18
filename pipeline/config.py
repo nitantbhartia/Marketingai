@@ -2,11 +2,52 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Dict
 
 import yaml
+
+
+def resolve_generation_pause(
+    db=None, pipeline_settings=None
+) -> Dict[str, Any]:
+    """Resolve generation pause state from env -> DB -> config.
+
+    Shared by BaseAgent.generation_paused() and the dashboard server so the
+    resolution logic lives in exactly one place.
+
+    Returns {"paused": bool, "source": str}.
+    """
+    env_val = os.getenv("PIPELINE_PAUSE_GENERATION")
+    if env_val is not None:
+        paused = env_val.strip().lower() in {"1", "true", "yes", "on"}
+        return {"paused": paused, "source": "env"}
+
+    if db is not None:
+        try:
+            rows = db.get_metrics(name="pipeline_pause", limit=1)
+            if rows:
+                row = rows[0]
+                paused = bool(float(row.metric_value or 0.0) > 0.0)
+                details = row.details or ""
+                if details:
+                    try:
+                        payload = json.loads(details)
+                        if "paused" in payload:
+                            paused = bool(payload.get("paused"))
+                    except Exception:
+                        pass
+                return {"paused": paused, "source": "dashboard_override"}
+        except Exception:
+            pass
+
+    config_val = bool(
+        getattr(pipeline_settings, "pause_generation", False)
+    ) if pipeline_settings else True
+    return {"paused": config_val, "source": "config"}
 
 
 @dataclass
