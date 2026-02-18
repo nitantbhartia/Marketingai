@@ -124,6 +124,8 @@ class PipelineSettings:
     max_word_count_by_product: dict[str, int] = field(
         default_factory=lambda: {"medbill": 2500}
     )
+    min_word_count: int = 1200
+    min_word_count_by_product: dict[str, int] = field(default_factory=dict)
     products: list[str] = field(default_factory=lambda: ["claimcoach", "medbill"])
     max_revision_rounds: int = 5
     sage_min_score_gain_for_revision: float = 3.0

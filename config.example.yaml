@@ -69,6 +69,9 @@ pipeline:
   daily_promote_cap: 8
   max_word_count_by_product:
     medbill: 2500
+  min_word_count: 1200
+  min_word_count_by_product:
+    medbill: 1400
   products:
     - claimcoach
     - medbill

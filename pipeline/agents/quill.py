@@ -2739,6 +2739,15 @@ Article:
         except Exception:
             return self.MAX_WORD_COUNT
 
+    def _min_word_count_for_article(self, article=None) -> int:
+        product = (getattr(article, "product", "") or "claimcoach").strip().lower()
+        overrides = getattr(self.config.pipeline, "min_word_count_by_product", {}) or {}
+        default_min = int(getattr(self.config.pipeline, "min_word_count", self.MIN_WORD_COUNT))
+        try:
+            return int(overrides.get(product, default_min))
+        except Exception:
+            return default_min
+
     def _passes_minimum_bar(
         self, content: str, wc: int, article=None
     ) -> tuple[bool, str]:
@@ -2748,9 +2757,10 @@ Article:
         Quill can retry rather than wasting a Sage review cycle.
         """
         reasons = []
+        min_word_count = self._min_word_count_for_article(article)
         max_word_count = self._max_word_count_for_article(article)
-        if wc < self.MIN_WORD_COUNT:
-            reasons.append(f"Word count {wc} below minimum {self.MIN_WORD_COUNT}")
+        if wc < min_word_count:
+            reasons.append(f"Word count {wc} below minimum {min_word_count}")
         if wc > max_word_count:
             reasons.append(f"Word count {wc} exceeds maximum {max_word_count}")
 
