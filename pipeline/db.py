@@ -599,6 +599,51 @@ class Database:
             ).fetchall()
         return [PipelineMetric(**dict(r)) for r in rows]
 
+    def get_llm_usage(
+        self, since: str | None = None, article_id: int | None = None, limit: int = 100000
+    ) -> dict:
+        """Aggregate llm_call count and cost, optionally scoped to one article."""
+        metrics = self.get_metrics(name="llm_call", since=since, limit=limit)
+        if article_id is None:
+            return {
+                "calls": len(metrics),
+                "cost_usd": round(sum(float(m.metric_value or 0.0) for m in metrics), 6),
+            }
+
+        calls = 0
+        cost = 0.0
+        target = int(article_id)
+        for m in metrics:
+            details = m.details or ""
+            if not details:
+                continue
+            try:
+                payload = json.loads(details)
+            except Exception:
+                continue
+            if int(payload.get("article_id") or 0) != target:
+                continue
+            calls += 1
+            cost += float(m.metric_value or 0.0)
+        return {"calls": calls, "cost_usd": round(cost, 6)}
+
+    def count_articles_updated_since(
+        self, status: str, since: str, product: str | None = None
+    ) -> int:
+        """Count rows currently in *status* and updated after *since*."""
+        conditions = ["status = ?", "updated_at >= ?"]
+        params: list = [status, since]
+        if product:
+            conditions.append("COALESCE(product, 'claimcoach') = ?")
+            params.append(product)
+        where = " AND ".join(conditions)
+        with self._connect() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS cnt FROM articles WHERE {where}",
+                params,
+            ).fetchone()
+        return int(row["cnt"] or 0)
+
     def get_roi_kpis(self, days: int = 90) -> dict:
         """Compute ROI KPIs for dashboard/reporting."""
         now = datetime.now(timezone.utc)

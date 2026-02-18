@@ -482,6 +482,8 @@ class SageAgent(BaseAgent):
         # Quill can automatically improve them using Sage's feedback.
         # Critical violations get max 2 rounds; standard issues get 5.
         total_score = round(total_score, 1)
+        previous_score = float(getattr(article, "sage_score", 0.0) or 0.0)
+        score_gain = round(total_score - previous_score, 2)
         threshold = self.config.pipeline.approval_score_threshold
         if total_score >= threshold and not has_critical:
             decision = "approved"
@@ -498,6 +500,30 @@ class SageAgent(BaseAgent):
         else:
             decision = "revision"
             new_status = ArticleStatus.REVISION.value
+
+        # Loop breaker: if revisions aren't improving score enough, stop auto-looping.
+        projected_round = int(getattr(article, "revision_count", 0) or 0) + 1
+        low_progress_rounds = max(
+            1, int(getattr(self.config.pipeline, "sage_low_progress_rounds", 2))
+        )
+        min_gain = float(
+            getattr(self.config.pipeline, "sage_min_score_gain_for_revision", 3.0)
+        )
+        low_progress = (
+            decision == "revision"
+            and not has_critical
+            and projected_round >= low_progress_rounds
+            and score_gain < min_gain
+        )
+        if low_progress:
+            route = str(
+                getattr(self.config.pipeline, "sage_low_progress_route", "review")
+            ).strip().lower()
+            if route == "rejected":
+                decision = "rejected"
+                new_status = ArticleStatus.REJECTED.value
+            else:
+                new_status = ArticleStatus.REVIEW.value
 
         # Format revision notes
         revision_notes = self._format_review(scores, total_score, decision, all_issues)
@@ -516,6 +542,11 @@ class SageAgent(BaseAgent):
                 f"fix immediately or article will be rejected after "
                 f"{max_rounds - article.revision_count} more round(s)]"
             )
+        if low_progress:
+            revision_notes += (
+                f"\n\n[AUTO-STOP: Low revision progress (+{score_gain} points < {min_gain}) "
+                f"after {projected_round} rounds. Routed to {new_status.value} for manual handling.]"
+            )
 
         # Update article
         update_kwargs = {
@@ -530,12 +561,17 @@ class SageAgent(BaseAgent):
             "state_accuracy": state_accuracy,
             "product_compliance": product_compliance,
         }
-        if decision == "revision":
+        if decision == "revision" and new_status == ArticleStatus.REVISION.value:
             existing_notes = article.revision_notes or ""
             separator = "\n\n---\n\n" if existing_notes else ""
             update_kwargs["revision_notes"] = existing_notes + separator + revision_notes
             update_kwargs["revision_count"] = article.revision_count + 1
             update_kwargs["writer_claim"] = ""  # Release for Quill to pick up
+        elif decision == "revision":
+            existing_notes = article.revision_notes or ""
+            separator = "\n\n---\n\n" if existing_notes else ""
+            update_kwargs["revision_notes"] = existing_notes + separator + revision_notes
+            update_kwargs["revision_count"] = article.revision_count + 1
         elif decision == "rejected":
             update_kwargs["revision_notes"] = revision_notes
 

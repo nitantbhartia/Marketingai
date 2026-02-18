@@ -126,6 +126,9 @@ class PipelineSettings:
     )
     products: list[str] = field(default_factory=lambda: ["claimcoach", "medbill"])
     max_revision_rounds: int = 5
+    sage_min_score_gain_for_revision: float = 3.0
+    sage_low_progress_rounds: int = 2
+    sage_low_progress_route: str = "review"
     quill_stale_recovery_hours: int = 4
     approval_score_threshold: int = 80
     dashboard_url: str = ""
@@ -142,6 +145,10 @@ class PipelineSettings:
     refresh_position_threshold: float = 12.0
     refresh_clicks_threshold: int = 3
     monthly_refresh_cap: int = 8
+    quill_article_call_cap: int = 8
+    quill_article_cost_cap_usd: float = 0.40
+    quill_daily_spend_guard_usd: float = 2.0
+    quill_daily_guard_requires_zero_approvals: bool = True
 
 
 @dataclass

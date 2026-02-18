@@ -357,6 +357,37 @@ class QuillAgent(BaseAgent):
         prevents revision loops from starving the pipeline of fresh content.
         """
         recovered = self._recover_stale_in_progress()
+        now = datetime.now(timezone.utc)
+        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+        # Circuit breaker: if spend climbs and nothing reaches review, pause writing.
+        spend_guard = float(
+            getattr(self.config.pipeline, "quill_daily_spend_guard_usd", 0.0) or 0.0
+        )
+        require_zero_approvals = bool(
+            getattr(self.config.pipeline, "quill_daily_guard_requires_zero_approvals", True)
+        )
+        if spend_guard > 0:
+            llm_usage_today = self.db.get_llm_usage(since=start_of_day)
+            review_count_today = self.db.count_articles_updated_since(
+                status=ArticleStatus.REVIEW.value,
+                since=start_of_day,
+            )
+            if llm_usage_today["cost_usd"] >= spend_guard and (
+                not require_zero_approvals or review_count_today == 0
+            ):
+                logger.warning(
+                    "Quill circuit breaker tripped: spend_today=$%.3f, review_count_today=%s",
+                    llm_usage_today["cost_usd"],
+                    review_count_today,
+                )
+                return {
+                    "status": "idle",
+                    "reason": "daily_spend_guard",
+                    "spend_today_usd": llm_usage_today["cost_usd"],
+                    "review_count_today": review_count_today,
+                    "recovered_stale_in_progress": recovered,
+                }
 
         max_per_run = getattr(self.config.pipeline, "max_articles_per_run", 3)
         products = list(getattr(self.config.pipeline, "products", []) or ["claimcoach"])
@@ -549,6 +580,23 @@ class QuillAgent(BaseAgent):
             self.db.update_article(article_id, writer_claim="")
             return {"status": "error", "reason": "article_not_found", "is_revision": is_revision}
 
+        budget_ok, budget_note = self._check_article_budget(article)
+        if not budget_ok:
+            existing_notes = article.revision_notes or ""
+            separator = "\n\n---\n\n" if existing_notes else ""
+            self.db.update_article(
+                article.id,
+                status=ArticleStatus.REVIEW.value,
+                writer_claim="",
+                revision_notes=existing_notes + separator + budget_note,
+            )
+            return {
+                "status": "budget_hold",
+                "article_id": article.id,
+                "reason": budget_note,
+                "is_revision": is_revision,
+            }
+
         logger.info(f"Writing article: {article.target_keyword} (revision={is_revision})")
 
         try:
@@ -566,6 +614,29 @@ class QuillAgent(BaseAgent):
             logger.error(f"Unexpected error writing article {article_id}: {e}", exc_info=True)
             self._rollback_claim(article_id, is_revision)
             return {"status": "error", "article_id": article_id, "reason": str(e)}
+
+    def _check_article_budget(self, article) -> tuple[bool, str]:
+        """Prevent runaway spend on one article looping in revision."""
+        call_cap = int(getattr(self.config.pipeline, "quill_article_call_cap", 0) or 0)
+        cost_cap = float(getattr(self.config.pipeline, "quill_article_cost_cap_usd", 0.0) or 0.0)
+        if call_cap <= 0 and cost_cap <= 0:
+            return True, ""
+
+        since = (article.created_at or "").strip() or None
+        usage = self.db.get_llm_usage(since=since, article_id=article.id)
+        calls = int(usage.get("calls", 0) or 0)
+        cost = float(usage.get("cost_usd", 0.0) or 0.0)
+        if call_cap > 0 and calls >= call_cap:
+            return (
+                False,
+                f"[AUTO-HOLD] Article exceeded per-article LLM call cap ({calls}/{call_cap}). Moved to review.",
+            )
+        if cost_cap > 0 and cost >= cost_cap:
+            return (
+                False,
+                f"[AUTO-HOLD] Article exceeded per-article cost cap (${cost:.3f}/${cost_cap:.2f}). Moved to review.",
+            )
+        return True, ""
 
     def _rollback_claim(self, article_id: int, is_revision: bool, phase: str = "") -> None:
         """Release writer claim and reset the article to its appropriate queued status.

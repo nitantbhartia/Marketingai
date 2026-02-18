@@ -73,8 +73,15 @@ pipeline:
     - claimcoach
     - medbill
   max_revision_rounds: 5
+  sage_min_score_gain_for_revision: 3.0
+  sage_low_progress_rounds: 2
+  sage_low_progress_route: "review"   # review|rejected
   quill_stale_recovery_hours: 4
   approval_score_threshold: 80
+  quill_article_call_cap: 8
+  quill_article_cost_cap_usd: 0.40
+  quill_daily_spend_guard_usd: 2.0
+  quill_daily_guard_requires_zero_approvals: true
   dashboard_url: "http://localhost:8000"  # Review dashboard URL (set to empty to disable notifications)
   quill_use_strategy_on_high_trust_only: true
   quill_enable_contrastive_critique: true
