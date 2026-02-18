@@ -872,9 +872,15 @@ class Database:
             rows = conn.execute(
                 """SELECT * FROM articles
                    WHERE updated_at < ?
-                     AND status NOT IN (?, ?, ?)
+                     AND status NOT IN (?, ?, ?, ?)
                    ORDER BY updated_at ASC""",
-                (cutoff, ArticleStatus.BACKLOG.value, ArticleStatus.DONE.value, ArticleStatus.AMPLIFIED.value),
+                (
+                    cutoff,
+                    ArticleStatus.BACKLOG.value,
+                    ArticleStatus.DONE.value,
+                    ArticleStatus.AMPLIFIED.value,
+                    ArticleStatus.REJECTED.value,
+                ),
             ).fetchall()
         return [self._row_to_article(r) for r in rows]
 

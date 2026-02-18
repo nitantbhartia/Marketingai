@@ -500,27 +500,28 @@ class QuillAgent(BaseAgent):
                 return self._write_one_inner(article, article_id, is_revision)
         except RateLimitError as e:
             logger.warning(f"Rate limited during pre-draft of article {article_id}: {e}")
-            rollback_status = (
-                ArticleStatus.REVISION.value if is_revision
-                else ArticleStatus.TODO.value
-            )
-            self.db.update_article(
-                article_id, status=rollback_status, writer_claim=""
-            )
-            self.db.record_metric("rate_limit", 0, json.dumps({
-                "agent": "quill", "article_id": article_id, "phase": "pre_draft",
-            }))
+            self._rollback_claim(article_id, is_revision, phase="pre_draft")
             return {"status": "rate_limited", "article_id": article_id, "reason": str(e), "is_revision": is_revision}
         except Exception as e:
             logger.error(f"Unexpected error writing article {article_id}: {e}", exc_info=True)
-            rollback_status = (
-                ArticleStatus.REVISION.value if is_revision
-                else ArticleStatus.TODO.value
-            )
-            self.db.update_article(
-                article_id, status=rollback_status, writer_claim=""
-            )
+            self._rollback_claim(article_id, is_revision)
             return {"status": "error", "article_id": article_id, "reason": str(e)}
+
+    def _rollback_claim(self, article_id: int, is_revision: bool, phase: str = "") -> None:
+        """Release writer claim and reset the article to its appropriate queued status.
+
+        Call this in any except block inside the write pipeline so the article
+        can be re-claimed on the next scheduler tick rather than staying stuck.
+        """
+        rollback_status = (
+            ArticleStatus.REVISION.value if is_revision
+            else ArticleStatus.TODO.value
+        )
+        self.db.update_article(article_id, status=rollback_status, writer_claim="")
+        if phase:
+            self.db.record_metric("rate_limit", 0, json.dumps({
+                "agent": "quill", "article_id": article_id, "phase": phase,
+            }))
 
     def _write_one_inner(self, article, article_id: int, is_revision: bool) -> dict[str, Any]:
         """Inner write logic — caller guarantees claim release on exception."""
@@ -544,16 +545,7 @@ class QuillAgent(BaseAgent):
                 )
             except RateLimitError as e:
                 logger.warning(f"Rate limited during targeted revision of article {article_id}: {e}")
-                rollback_status = (
-                    ArticleStatus.REVISION.value if is_revision
-                    else ArticleStatus.TODO.value
-                )
-                self.db.update_article(
-                    article_id, status=rollback_status, writer_claim=""
-                )
-                self.db.record_metric("rate_limit", 0, json.dumps({
-                    "agent": "quill", "article_id": article_id, "phase": "targeted_revision",
-                }))
+                self._rollback_claim(article_id, is_revision, phase="targeted_revision")
                 return {"status": "rate_limited", "article_id": article_id, "reason": str(e)}
             if result:
                 return result
@@ -611,26 +603,11 @@ class QuillAgent(BaseAgent):
             )
         except RateLimitError as e:
             logger.warning(f"Rate limited during draft of article {article_id}: {e}")
-            rollback_status = (
-                ArticleStatus.REVISION.value if is_revision
-                else ArticleStatus.TODO.value
-            )
-            self.db.update_article(
-                article_id, status=rollback_status, writer_claim=""
-            )
-            self.db.record_metric("rate_limit", 0, json.dumps({
-                "agent": "quill", "article_id": article_id, "phase": "draft",
-            }))
+            self._rollback_claim(article_id, is_revision, phase="draft")
             return {"status": "rate_limited", "article_id": article_id, "reason": str(e)}
         except Exception as e:
             logger.error(f"Draft error: {e}")
-            rollback_status = (
-                ArticleStatus.REVISION.value if is_revision
-                else ArticleStatus.TODO.value
-            )
-            self.db.update_article(
-                article_id, status=rollback_status, writer_claim=""
-            )
+            self._rollback_claim(article_id, is_revision)
             return {"status": "error", "reason": str(e)}
 
         try:
@@ -657,10 +634,7 @@ class QuillAgent(BaseAgent):
                 logger.warning(
                     f"Article {article_id} failed quality gate: {gate_reason}"
                 )
-                rollback_status = (
-                    ArticleStatus.REVISION.value if is_revision
-                    else ArticleStatus.TODO.value
-                )
+                # Save partial content so humans can inspect; rollback claim/status.
                 self.db.update_article(
                     article_id,
                     title=title,
@@ -668,7 +642,7 @@ class QuillAgent(BaseAgent):
                     meta_description=meta_description,
                     slug=slug,
                     word_count=wc,
-                    status=rollback_status,
+                    status=ArticleStatus.REVISION.value if is_revision else ArticleStatus.TODO.value,
                     writer_claim="",
                     revision_notes=(article.revision_notes or "")
                     + f"\n\n[QUILL SELF-CHECK FAIL] {gate_reason}",
@@ -700,26 +674,11 @@ class QuillAgent(BaseAgent):
             self.db.update_article(article_id, **update_kwargs)
         except RateLimitError as e:
             logger.warning(f"Rate limited during post-draft of article {article_id}: {e}")
-            rollback_status = (
-                ArticleStatus.REVISION.value if is_revision
-                else ArticleStatus.TODO.value
-            )
-            self.db.update_article(
-                article_id, status=rollback_status, writer_claim=""
-            )
-            self.db.record_metric("rate_limit", 0, json.dumps({
-                "agent": "quill", "article_id": article_id, "phase": "post_draft",
-            }))
+            self._rollback_claim(article_id, is_revision, phase="post_draft")
             return {"status": "rate_limited", "article_id": article_id, "reason": str(e)}
         except Exception as e:
             logger.error(f"Post-draft error for article {article_id}: {e}", exc_info=True)
-            rollback_status = (
-                ArticleStatus.REVISION.value if is_revision
-                else ArticleStatus.TODO.value
-            )
-            self.db.update_article(
-                article_id, status=rollback_status, writer_claim=""
-            )
+            self._rollback_claim(article_id, is_revision)
             return {"status": "error", "reason": str(e)}
 
         self.db.record_metric("quill_write", wc, json.dumps({
