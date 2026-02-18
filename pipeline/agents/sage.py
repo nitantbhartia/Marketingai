@@ -382,7 +382,7 @@ class SageAgent(BaseAgent):
 
             # Anchor text quality (2 pts) — check anchor text is descriptive,
             # not "click here" or raw URLs
-            anchor_score, anchor_issues = self._check_anchor_text_quality(content)
+            anchor_score, anchor_issues = self._check_anchor_text_quality(content, article)
             link_score += anchor_score
             link_issues.extend(anchor_issues)
         else:
@@ -780,28 +780,38 @@ Article excerpt:
 
         content_lower = content.lower()
 
-        # Check for false product claims (aligned with PRODUCT_CONTEXT.md)
-        false_claims = [
-            ("negotiate on your behalf", "Claims ClaimCoach negotiates with insurers"),
-            ("negotiate with insurance", "Implies ClaimCoach negotiates directly"),
-            ("communicates with.*adjuster", "Claims ClaimCoach communicates with adjusters"),
-            ("file a claim for you", "Claims ClaimCoach files claims"),
-            ("file your dispute", "Claims ClaimCoach files disputes"),
-            ("files? your appeal", "Claims ClaimCoach files appeals"),
-            ("upload your policy", "References future feature (PDF uploads)"),
-            ("upload your settlement", "References future feature (document uploads)"),
-            ("generates? (?:a |your )?dispute letter", "References future feature (dispute letters)"),
-            ("chat assistant", "References future feature (chat assistant)"),
-            ("status tracking", "References future feature (status tracking)"),
-            ("pull(?:s)? comparable.*listings", "References future feature (auto comp pulls)"),
-            ("analyze your health insurance", "References non-auto insurance"),
-            ("analyze your homeowner", "References non-auto insurance"),
-            ("analyze your renter", "References non-auto insurance"),
-            ("access insurance.*database", "Claims database access"),
-            ("access.*ccc one", "Claims access to CCC ONE"),
-            ("binding valuation", "Claims legally binding valuations"),
-            ("legally enforceable appraisal", "Claims legally enforceable appraisals"),
-        ]
+        product = (getattr(article, "product", "") or "claimcoach").strip().lower()
+        if product == "medbill":
+            false_claims = [
+                ("file a claim for you", "Claims BillKarma files insurance claims"),
+                ("files? your appeal", "Claims BillKarma files appeals"),
+                ("medical advice", "Claims BillKarma provides medical advice"),
+                ("diagnos", "Claims BillKarma provides diagnosis"),
+                ("legally enforceable", "Claims legally enforceable outcomes"),
+                ("guaranteed savings", "Guarantees specific savings"),
+            ]
+        else:
+            false_claims = [
+                ("negotiate on your behalf", "Claims ClaimCoach negotiates with insurers"),
+                ("negotiate with insurance", "Implies ClaimCoach negotiates directly"),
+                ("communicates with.*adjuster", "Claims ClaimCoach communicates with adjusters"),
+                ("file a claim for you", "Claims ClaimCoach files claims"),
+                ("file your dispute", "Claims ClaimCoach files disputes"),
+                ("files? your appeal", "Claims ClaimCoach files appeals"),
+                ("upload your policy", "References future feature (PDF uploads)"),
+                ("upload your settlement", "References future feature (document uploads)"),
+                ("generates? (?:a |your )?dispute letter", "References future feature (dispute letters)"),
+                ("chat assistant", "References future feature (chat assistant)"),
+                ("status tracking", "References future feature (status tracking)"),
+                ("pull(?:s)? comparable.*listings", "References future feature (auto comp pulls)"),
+                ("analyze your health insurance", "References non-auto insurance"),
+                ("analyze your homeowner", "References non-auto insurance"),
+                ("analyze your renter", "References non-auto insurance"),
+                ("access insurance.*database", "Claims database access"),
+                ("access.*ccc one", "Claims access to CCC ONE"),
+                ("binding valuation", "Claims legally binding valuations"),
+                ("legally enforceable appraisal", "Claims legally enforceable appraisals"),
+            ]
 
         for pattern, issue in false_claims:
             if re.search(pattern, content_lower):
@@ -971,7 +981,7 @@ Format each issue on its own line starting with "- "."""
         return score, issues
 
     @staticmethod
-    def _check_anchor_text_quality(content: str) -> tuple[float, list[str]]:
+    def _check_anchor_text_quality(content: str, article=None) -> tuple[float, list[str]]:
         """Score internal link anchor text quality (2 pts).
 
         Good anchor text is descriptive and keyword-relevant:
@@ -988,9 +998,11 @@ Format each issue on its own line starting with "- "."""
             return 0.0, []
 
         # Filter to internal links only
+        product = (getattr(article, "product", "") or "claimcoach").strip().lower()
+        product_domain = "billkarma" if product == "medbill" else "claimcoach"
         internal = [
             (anchor, url) for anchor, url in links
-            if "claimcoach" in url.lower() or url.startswith("/")
+            if product_domain in url.lower() or url.startswith("/")
         ]
         if not internal:
             return 1.0, []  # No internal links to check — give partial credit

@@ -1920,6 +1920,27 @@ Article:
                     )
                     fixes.append("inserted_keyword_first_100_words")
 
+        # Check 1b: Keyword in at least 2 H2 headers.
+        if keyword_lower:
+            h2_lines = re.findall(r"^##\s+(.+)$", content, flags=re.MULTILINE)
+            kw_h2_count = sum(1 for h in h2_lines if _keyword_match(keyword, h))
+            if kw_h2_count < 2 and h2_lines:
+                needed = 2 - kw_h2_count
+                updated = content
+                for h in h2_lines:
+                    if needed <= 0:
+                        break
+                    if _keyword_match(keyword, h):
+                        continue
+                    old = f"## {h}"
+                    new = f"## {h} ({keyword})"
+                    if old in updated:
+                        updated = updated.replace(old, new, 1)
+                        needed -= 1
+                if updated != content:
+                    content = updated
+                    fixes.append("added_keyword_to_h2_headers")
+
         # Check 2: CTA placement — 3 CTAs (1 early, 1 contextual, 1 closing)
         content_lower = content.lower()
         domain_pat = re.escape(self._product_info(article)["domain"])
@@ -1960,6 +1981,17 @@ Article:
             if keyword_lower and not _keyword_match(keyword, meta_description):
                 meta_description += f" Learn about {keyword}."
             fixes.append("extended_meta_description")
+
+        # Keep meta tightly in SEO target range (150-160 chars).
+        if len(meta_description) < 150:
+            pad = " Learn your options and next steps."
+            while len(meta_description) < 150 and pad:
+                meta_description += pad[: max(0, 150 - len(meta_description))]
+            meta_description = meta_description[:160]
+            fixes.append("normalized_meta_length_min")
+        elif len(meta_description) > 160:
+            meta_description = meta_description[:157].rstrip() + "..."
+            fixes.append("normalized_meta_length_max")
 
         # Check 5: Keyword in meta description (fuzzy match)
         if keyword_lower and not _keyword_match(keyword, meta_description):
@@ -2052,6 +2084,14 @@ Article:
         content, freshness_fixes = auto_fix_stale_years(content)
         if freshness_fixes > 0:
             fixes.append(f"fixed_{freshness_fixes}_stale_year_references")
+        if "2026" not in content:
+            para_break = content.find("\n\n")
+            freshness_line = "As of 2026, verify your state and insurer rules before sending your dispute."
+            if para_break > 0:
+                content = content[:para_break] + "\n\n" + freshness_line + content[para_break:]
+            else:
+                content += "\n\n" + freshness_line
+            fixes.append("added_freshness_line")
 
         # Check 11: Interactive conversion tool — embed a mini widget
         # placeholder based on article topic.  Ezra renders these into
@@ -2090,6 +2130,12 @@ Article:
                         content += placeholder
                 fixes.append(f"embedded_tool_{tool_id}")
 
+        # Check 12: Prevent truncated ending artifacts.
+        stripped = content.rstrip()
+        if stripped and stripped[-1] not in ".!?)\"'\n":
+            content = stripped + "."
+            fixes.append("fixed_truncated_ending")
+
         if fixes:
             logger.info(f"Self-review applied {len(fixes)} fixes: {fixes}")
 
@@ -2099,12 +2145,24 @@ Article:
     def _citation_url_for_claim(article, claim_type: str) -> str:
         """Pick an authoritative fallback citation URL per claim type."""
         state = (getattr(article, "target_state", "") or "").strip().lower()
+        state_doi_map = {
+            "california": "https://www.insurance.ca.gov/",
+            "texas": "https://www.tdi.texas.gov/",
+            "florida": "https://www.myfloridacfo.com/division/consumers",
+            "new york": "https://www.dfs.ny.gov/",
+            "georgia": "https://oci.georgia.gov/",
+            "north carolina": "https://www.ncdoi.gov/",
+            "pennsylvania": "https://www.insurance.pa.gov/",
+            "illinois": "https://idoi.illinois.gov/",
+            "ohio": "https://insurance.ohio.gov/",
+            "michigan": "https://www.michigan.gov/difs",
+        }
         if claim_type == "legal":
             if state:
-                return "https://www.naic.org/state_web_map.htm"
+                return state_doi_map.get(state, "https://www.naic.org/state_web_map.htm")
             return "https://www.law.cornell.edu/"
         if claim_type == "timeline":
-            return "https://content.naic.org/consumer/auto-insurance.htm"
+            return state_doi_map.get(state, "https://content.naic.org/consumer/auto-insurance.htm")
         return "https://www.naic.org/"
 
     def _inject_claim_citations(self, content: str, article) -> tuple[str, list[str]]:
@@ -2647,28 +2705,21 @@ Article:
         return "".join(result_parts)
 
     def _generate_faq_block(self, article) -> str:
-        """Generate a quick FAQ section using Flash-Lite (utility tier)."""
-        try:
-            result = self.call_claude(
-                prompt=(
-                    f'Generate an FAQ section for an article about "{article.target_keyword}". '
-                    f"Write 3-4 questions and concise answers (2-3 sentences each). "
-                    f"Format as:\n## Frequently Asked Questions\n\n"
-                    f"### Question here?\n\nAnswer here.\n\n"
-                    f"Make questions real things people search for."
-                ),
-                model=self.utility_model,
-                max_tokens=800,
-            )
-            faq = result.strip()
-            # Validate FAQ structure: need H3 questions with answers
-            if not self._validate_faq_structure(faq):
-                logger.warning("Generated FAQ failed structure validation, discarding")
-                return ""
-            return faq
-        except Exception as e:
-            logger.warning(f"FAQ generation failed: {e}")
-            return ""
+        """Generate a deterministic FAQ section without extra LLM cost."""
+        keyword = (article.target_keyword or "this topic").strip()
+        faq = (
+            "## Frequently Asked Questions\n\n"
+            f"### What is the first step if I'm dealing with {keyword}?\n\n"
+            "Start by collecting the documents that support your position and writing down the exact line items you dispute. "
+            "A clear paper trail usually gives you more leverage than a phone-only conversation.\n\n"
+            f"### How long does a typical {keyword} dispute take?\n\n"
+            "Simple corrections can resolve in days, while formal disputes can take several weeks. "
+            "Keep follow-ups in writing so delays are documented.\n\n"
+            f"### What if the first response on {keyword} is a denial?\n\n"
+            "Ask for the denial reason in writing, attach your evidence, and escalate to a supervisor or regulator if needed. "
+            "A specific counter-response is usually stronger than a generic complaint.\n"
+        )
+        return faq if self._validate_faq_structure(faq) else ""
 
     @staticmethod
     def _validate_faq_structure(faq_text: str) -> bool:
