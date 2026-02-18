@@ -71,7 +71,7 @@ pipeline:
   approval_score_threshold: 80
   dashboard_url: "http://localhost:8000"  # Review dashboard URL (set to empty to disable notifications)
   quill_use_strategy_on_high_trust_only: true
-  quill_enable_contrastive_critique: false
+  quill_enable_contrastive_critique: true
   sage_deep_fact_check_on_high_trust_only: true
   quill_use_fact_pack: true
   quill_use_winner_memory: true

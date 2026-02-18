@@ -389,17 +389,27 @@ class ScoutAgent(BaseAgent):
         1. Categories with repeated high-pass lessons
         2. Higher commercial intent and search volume
         3. Newer rows as tie-breaker
-        Categories repeatedly marked low-pass are deprioritized but not dropped.
+        Categories repeatedly marked low-pass or revision-prone are deprioritized
+        but not dropped — they may still succeed with better briefs.
         """
         preferred = set(hints.get("preferred", []))
         avoid = set(hints.get("avoid", []))
+        revision_prone_cats = set(hints.get("revision_prone_categories", []))
+        revision_prone_intents = set(hints.get("revision_prone_intents", []))
         category = article.content_category or ""
+        intent = (getattr(article, "intent_template", "") or "").strip()
 
         bucket = 0.0
         if category in preferred:
             bucket += 2.0
         if category in avoid:
             bucket -= 2.0
+        # Revision-prone signals: apply an additional penalty on top of
+        # low_pass_category so habitual revision loops get de-queued faster.
+        if category in revision_prone_cats:
+            bucket -= 1.5
+        if intent in revision_prone_intents:
+            bucket -= 1.0
 
         return (
             bucket,
@@ -663,12 +673,17 @@ class ScoutAgent(BaseAgent):
         hints: dict[str, list[str]] = {
             "preferred": [], "avoid": [], "gsc_insights": [],
             "competitor_gaps": [], "community_demand": [],
+            "revision_prone_categories": [], "revision_prone_intents": [],
         }
         for lesson in lessons:
             if lesson.category == "high_pass_category" and lesson.occurrences >= 2:
                 hints["preferred"].append(lesson.lesson)
             elif lesson.category == "low_pass_category" and lesson.occurrences >= 3:
                 hints["avoid"].append(lesson.lesson)
+            elif lesson.category == "revision_prone_category" and lesson.occurrences >= 2:
+                hints["revision_prone_categories"].append(lesson.lesson)
+            elif lesson.category == "revision_prone_intent" and lesson.occurrences >= 2:
+                hints["revision_prone_intents"].append(lesson.lesson)
             elif lesson.category.startswith("gsc_"):
                 hints["gsc_insights"].append(lesson.lesson)
             elif lesson.category == "competitor_gap":
