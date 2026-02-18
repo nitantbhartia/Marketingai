@@ -113,3 +113,15 @@ Yes. Negotiation can still apply to patient-responsibility balances, coding corr
 Specific disputed lines, documented evidence, and a clear written correction request.
 
 Negotiate from evidence, not memory: [BillScan](https://billkarma.app).
+
+<!-- SEO_META_START -->
+META_DESCRIPTION: ER bill too high in 2026? Use this evidence-first playbook — 15-min dispute packet, 48-hour plan, negotiation sequence, and escalation path to cut your balance.
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Article","headline":"ER Bill Too High in 2026? Use This Evidence-First Negotiation Playbook","description":"ER bill too high in 2026? Use this evidence-first playbook — 15-min dispute packet, 48-hour plan, negotiation sequence, and escalation path to cut your balance.","datePublished":"2026-02-18","dateModified":"2026-02-18","author":{"@type":"Organization","name":"BillScan Editorial Team"},"publisher":{"@type":"Organization","name":"BillScan","url":"https://billkarma.app"},"mainEntityOfPage":"https://billkarma.app"}
+</script>
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Should I pay an ER bill first and dispute later?","acceptedAnswer":{"@type":"Answer","text":"Usually no. Paying in full reduces your leverage and can complicate refunds. Request an account hold while you build your dispute packet and validate line-item accuracy before making any payment."}},{"@type":"Question","name":"Can insured patients still negotiate ER bills?","acceptedAnswer":{"@type":"Answer","text":"Yes. Negotiation still applies to your patient-responsibility balance — particularly for coding corrections, repricing to benchmark rates, and payment terms. Your EOB is the starting point: compare what was billed to what was allowed and what you owe."}},{"@type":"Question","name":"What gets the quickest movement on an ER bill dispute?","acceptedAnswer":{"@type":"Answer","text":"Specific disputed lines with documented evidence and a clear written correction request. Hospitals respond faster to accuracy-based disputes — where you cite a specific CPT code, billed amount, and reason for dispute — than to generic hardship requests."}}]}
+</script>
+<!-- SEO_META_END -->

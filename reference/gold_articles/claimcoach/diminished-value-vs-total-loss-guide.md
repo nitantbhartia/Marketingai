@@ -126,3 +126,15 @@ Negotiating before they quantify lane-specific upside. Strategy without numbers 
 Not always. Start with evidence and policy/state rules. Consider legal counsel for complex coverage disputes or bad-faith concerns.
 
 Choose your lane before the adjuster chooses it for you: [run your strategy check](https://claimcoach.app).
+
+<!-- SEO_META_START -->
+META_DESCRIPTION: Diminished value vs total loss 2026 — which strategy pays more, a side-by-side economics table, 7-step selection framework, and 7-day decision sprint.
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Article","headline":"Diminished Value vs Total Loss in 2026: Which Strategy Actually Pays More?","description":"Diminished value vs total loss 2026 — which strategy pays more, a side-by-side economics table, 7-step selection framework, and 7-day decision sprint.","datePublished":"2026-02-18","dateModified":"2026-02-18","author":{"@type":"Organization","name":"ClaimCoach Editorial Team"},"publisher":{"@type":"Organization","name":"ClaimCoach","url":"https://claimcoach.app"},"mainEntityOfPage":"https://claimcoach.app"}
+</script>
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can both diminished value and total loss claims apply at the same time?","acceptedAnswer":{"@type":"Answer","text":"Usually one lane dominates based on claim status. If the vehicle is totaled, total loss valuation controls. If repaired, diminished value may become relevant. Running both simultaneously typically dilutes evidence and leverage."}},{"@type":"Question","name":"What is the biggest mistake people make choosing between these strategies?","acceptedAnswer":{"@type":"Answer","text":"Negotiating before quantifying lane-specific upside. Strategy without numbers is guesswork. Build a one-page valuation snapshot first, then pick the lane with the higher evidence-adjusted net recovery."}},{"@type":"Question","name":"Do I need an attorney to choose between diminished value and total loss?","acceptedAnswer":{"@type":"Answer","text":"Not always. Start with evidence and your state's rules. Consider legal counsel for complex coverage disputes, bad-faith concerns, or when the gap between your supported value and the offer exceeds $5,000."}}]}
+</script>
+<!-- SEO_META_END -->

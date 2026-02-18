@@ -23,6 +23,33 @@ Run a pre-audit scan first: [BillScan](https://billkarma.app).
 
 Why this matters to your wallet: each confirmed error creates concrete reduction leverage.
 
+## How to Read Your Explanation of Benefits (EOB)
+
+Before you can audit the itemized bill, you need to understand your EOB — the statement your insurer sends after processing a claim. Most patients ignore it. That is a mistake.
+
+An EOB is not a bill. It is a breakdown of what happened between provider, insurer, and you:
+
+| EOB Column | What It Shows | What to Look For |
+|---|---|---|
+| **Billed amount** | What the provider charged | May be much higher than actual cost |
+| **Allowed amount** | Your insurer's negotiated rate | Should be lower than billed |
+| **Plan paid** | What insurer paid the provider | Cross-check against any payment notices |
+| **Your responsibility** | What you owe | The number to dispute if errors exist |
+| **Reason/remark codes** | Why claims were adjusted or denied | Codes like CO-4, CO-97, PR-1 explain each adjustment |
+
+**Key reason codes to flag:**
+- **CO-4**: Procedure code inconsistent with modifier — often an upcoding indicator
+- **CO-97**: Payment included in another service — look for unbundling
+- **PR-1**: Deductible applied — verify it matches your plan terms
+- **CO-45**: Charges exceed contracted/legislated fee — correct, but confirm allowed amount
+- **OA-23**: Payment adjusted due to prior payer — coordination of benefits issue worth verifying
+
+If your EOB and itemized bill don't match on line items, dates, or codes, that mismatch is your dispute entry point.
+
+Sources:
+- [CMS Medicare remittance advice remark codes](https://www.cms.gov/medicare/payment/remittance-advice-remark-codes)
+- [CMS claim adjustment reason codes](https://x12.org/codes/claim-adjustment-reason-codes)
+
 ## Build a Dispute Matrix (One Page)
 
 Create a table with four columns:
@@ -108,3 +135,15 @@ Results vary by bill type and error density, but audited disputes usually outper
 Yes. Calls move process; writing preserves leverage and escalation evidence.
 
 Do not pay blind. Audit first: [BillScan](https://billkarma.app).
+
+<!-- SEO_META_START -->
+META_DESCRIPTION: Itemized medical bill audit checklist 2026 — 10 checks that find the most errors, an EOB reading guide, and a dispute matrix template to cut your balance.
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Article","headline":"Itemized Medical Bill Audit Checklist (2026): Catch Errors Before You Negotiate","description":"Itemized medical bill audit checklist 2026 — 10 checks that find the most errors, an EOB reading guide, and a dispute matrix template to cut your balance.","datePublished":"2026-02-18","dateModified":"2026-02-18","author":{"@type":"Organization","name":"BillScan Editorial Team"},"publisher":{"@type":"Organization","name":"BillScan","url":"https://billkarma.app"},"mainEntityOfPage":"https://billkarma.app"}
+</script>
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is an itemized medical bill required on request?","acceptedAnswer":{"@type":"Answer","text":"Hospitals and providers are generally required to furnish itemized detail on request. Ask in writing and document any refusal — refusal to provide itemized billing can itself be a reportable issue with state regulators."}},{"@type":"Question","name":"How much can a medical bill audit save?","acceptedAnswer":{"@type":"Answer","text":"Results vary by bill type and error density, but studies show billing errors appear in 80% of medical bills. Audited disputes with a specific dispute matrix consistently outperform generic negotiation requests."}},{"@type":"Question","name":"Should I dispute medical bill errors in writing even after a phone call?","acceptedAnswer":{"@type":"Answer","text":"Yes. Phone calls move the process forward but provide no leverage for escalation. Written disputes with timestamped evidence are required if you need to escalate to a billing supervisor, patient advocate, or state regulator."}}]}
+</script>
+<!-- SEO_META_END -->
