@@ -559,11 +559,11 @@ class QuillAgent(BaseAgent):
                 return result
             # Fall through to full rewrite if targeted revision fails
 
-        outline_model = (
-            self.strategy_model
-            if self._use_strategy_model_for_article(article, is_revision=is_revision)
-            else self.fast_model
-        )
+        # Always use the strategy model for outline generation — the outline is
+        # the structural blueprint for the entire article and determines section
+        # coverage, citation plan, and FAQ seeds. The marginal cost difference
+        # versus fast_model is small compared to the quality improvement.
+        outline_model = self.strategy_model
 
         # ── Phase 0: Entity mapping (E-E-A-T knowledge graph) ──
         entity_map = self._extract_entities(article)
@@ -1229,7 +1229,7 @@ Format as a clean outline with ## headers and bullet points."""
                 prompt=prompt,
                 system="You are a content strategist creating detailed article outlines.",
                 model=model_name or self.strategy_model,
-                max_tokens=1500,
+                max_tokens=2500,
             )
             logger.info(
                 f"Generated outline for '{article.target_keyword}' "
@@ -1329,6 +1329,7 @@ Format as a clean outline with ## headers and bullet points."""
         friction_points = self._extract_friction_points(article)
 
         drafted_sections: list[str] = []
+        section_summaries: list[str] = []
         keyword = article.target_keyword
 
         for i, (heading, bullets) in enumerate(sections):
@@ -1356,10 +1357,22 @@ Format as a clean outline with ## headers and bullet points."""
                     "META_DESCRIPTION: <150-160 character meta description>\n"
                 )
             if not is_first:
-                section_prompt += (
-                    f"\n=== PREVIOUSLY WRITTEN (for continuity) ===\n"
-                    f"{drafted_sections[-1][-500:]}\n\n"
+                # Pass the tail of the previous section (1500 chars) plus a
+                # one-line summary of earlier sections so the model maintains
+                # narrative coherence without needing the full text.
+                prev_tail = drafted_sections[-1][-1500:]
+                prior_summary = (
+                    " | ".join(section_summaries[:-1]) if len(section_summaries) > 1 else ""
                 )
+                continuity = (
+                    f"\n=== PREVIOUSLY WRITTEN (for continuity) ===\n{prev_tail}\n\n"
+                )
+                if prior_summary:
+                    continuity += (
+                        f"=== EARLIER SECTIONS COVERED ===\n{prior_summary}\n"
+                        "Do NOT repeat these points. Build on them.\n\n"
+                    )
+                section_prompt += continuity
 
             # Inject friction point for the middle sections (where frustration lives)
             if friction_points and 1 <= i <= len(sections) - 2:
@@ -1394,12 +1407,102 @@ Format as a clean outline with ## headers and bullet points."""
                 temperature=self._draft_temperature(is_revision),
             )
             drafted_sections.append(section_text.strip())
+            # Build a one-line summary of this section for subsequent sections
+            # to reference — prevents circular repetition across sections.
+            heading_text = heading.lstrip("#").strip()
+            section_summaries.append(heading_text)
             logger.debug(
                 f"Drafted section {i + 1}/{len(sections)}: {heading} "
                 f"({len(section_text)} chars)"
             )
 
-        return "\n\n".join(drafted_sections)
+        assembled = "\n\n".join(drafted_sections)
+        return self._smooth_section_transitions(assembled, keyword)
+
+    def _smooth_section_transitions(self, content: str, keyword: str) -> str:
+        """Lightweight coherence pass over assembled section-by-section content.
+
+        Each section is drafted independently, which can leave abrupt topic
+        jumps and repetitive opening patterns ("In this section...", "Now
+        let's look at..."). This pass rewrites only the opening sentence of
+        each H2 section to create a natural narrative flow.
+
+        Uses the utility model — very cheap (~300 tokens per article) and
+        does not touch the body of any section.
+
+        Returns the smoothed content, or the original on failure.
+        """
+        if not self.has_llm:
+            return content
+
+        # Extract the opening lines of each H2 section boundary
+        h2_positions = [m.start() for m in re.finditer(r"\n## ", content)]
+        if len(h2_positions) < 2:
+            return content  # Not enough sections to smooth
+
+        # Build a list of (heading, first_body_sentence) for the prompt
+        transitions: list[tuple[int, str, str]] = []
+        for pos in h2_positions:
+            # Get the heading text
+            end_of_heading = content.find("\n", pos + 1)
+            if end_of_heading == -1:
+                continue
+            heading = content[pos + 1:end_of_heading].strip()
+            # Get the first non-empty line of body after the heading
+            after_heading = content[end_of_heading:].lstrip("\n")
+            first_line_end = after_heading.find("\n")
+            first_line = after_heading[:first_line_end].strip() if first_line_end > 0 else after_heading[:200].strip()
+            if first_line and not first_line.startswith(("![", ">", "-", "*", "1.", "#")):
+                transitions.append((pos, heading, first_line))
+
+        if not transitions:
+            return content
+
+        prompt = (
+            f'An article about "{keyword}" was drafted section-by-section. '
+            f"The section openings below may be abrupt, repetitive, or start with "
+            f'"In this section" / "Now let\'s" style filler. Rewrite ONLY the opening '
+            f"sentence of each section to flow naturally from the previous topic. "
+            f"Keep each rewrite under 25 words. Return ONLY the rewrites, one per line, "
+            f'in the format: HEADING_TEXT|||NEW_OPENING_SENTENCE\n\n'
+        )
+        for _, heading, first_line in transitions:
+            prompt += f"HEADING: {heading}\nCURRENT OPENING: {first_line}\n\n"
+
+        try:
+            response = self.call_claude(
+                prompt=prompt,
+                system="You are an editor fixing section transitions. Output only the format requested.",
+                model=self.utility_model,
+                max_tokens=400,
+            )
+        except Exception as e:
+            logger.debug(f"Transition smoothing failed: {e}")
+            return content
+
+        # Apply the rewrites
+        rewrites: dict[str, str] = {}
+        for line in response.splitlines():
+            if "|||" in line:
+                parts = line.split("|||", 1)
+                if len(parts) == 2:
+                    rewrites[parts[0].strip()] = parts[1].strip()
+
+        if not rewrites:
+            return content
+
+        smoothed = content
+        applied = 0
+        for _, heading, old_opening in transitions:
+            heading_text = heading.lstrip("#").strip()
+            new_opening = rewrites.get(heading_text, "")
+            if new_opening and old_opening and old_opening in smoothed:
+                smoothed = smoothed.replace(old_opening, new_opening, 1)
+                applied += 1
+
+        if applied:
+            logger.info(f"Smoothed {applied} section transitions for '{keyword}'")
+        return smoothed
 
     @staticmethod
     def _parse_outline_sections(outline: str) -> list[tuple[str, str]]:
@@ -1632,6 +1735,45 @@ Article:
             logger.warning(f"Contrastive critique failed: {e}")
             return content
 
+    def _natural_keyword_insertion(self, keyword: str) -> str:
+        """Return a one-sentence keyword mention that reads like a human wrote it.
+
+        Uses the utility model to generate a natural, contextually appropriate
+        sentence rather than a static template. Falls back to a category-aware
+        template if the LLM call fails.
+        """
+        if self.has_llm:
+            try:
+                result = self.call_claude(
+                    prompt=(
+                        f'Write ONE short sentence (under 20 words) that naturally '
+                        f'mentions "{keyword}" from the perspective of a car owner '
+                        f'dealing with an insurance settlement. It must sound like '
+                        f'a real person, not a blog intro. No AI-isms. No "In today\'s '
+                        f'world." Just a direct, grounded sentence. Output only the '
+                        f'sentence, no explanation.'
+                    ),
+                    system="You write plain, human-sounding insurance content.",
+                    model=self.utility_model,
+                    max_tokens=60,
+                )
+                sentence = result.strip().strip('"').strip("'")
+                if sentence and len(sentence) < 150:
+                    if not sentence.endswith((".","!","?")):
+                        sentence += "."
+                    return sentence + " "
+            except Exception:
+                pass
+        # Fallback: topic-aware alternatives, none of which are generic
+        fallbacks = [
+            f"Most adjusters underpay on {keyword} — and they're counting on you not to notice.",
+            f"Your offer may already be missing value on {keyword}.",
+            f"The fight over {keyword} is one you can win with the right numbers.",
+        ]
+        import hashlib
+        idx = int(hashlib.md5(keyword.encode()).hexdigest(), 16) % len(fallbacks)
+        return fallbacks[idx] + " "
+
     # ------------------------------------------------------------------
     # Phase 3: Self-review & auto-fix
     # ------------------------------------------------------------------
@@ -1666,15 +1808,16 @@ Article:
 
         # Check 1: Keyword in first 100 words (fuzzy match — allows stop words)
         if keyword_lower and not _keyword_match(keyword, content[:500]):
-            # Insert keyword into the first paragraph naturally
+            # Insert keyword into the first paragraph naturally.
+            # Use a small LLM call to produce a natural-sounding sentence
+            # rather than a static template that triggers AI-ism detectors.
             paragraphs = content.split("\n\n", 1)
             if paragraphs:
                 first_para = paragraphs[0]
-                # Find the first sentence end to insert after
                 sent_end = re.search(r"[.!?]\s", first_para)
                 if sent_end:
                     insert_pos = sent_end.end()
-                    insertion = f"When it comes to {keyword}, knowledge is your best weapon. "
+                    insertion = self._natural_keyword_insertion(keyword)
                     first_para = (
                         first_para[:insert_pos] + insertion + first_para[insert_pos:]
                     )

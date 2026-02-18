@@ -1270,6 +1270,22 @@ Format each issue on its own line starting with "- "."""
             elif decision in ("revision", "rejected"):
                 self.record_lesson("scout", "low_pass_category", article.content_category)
 
+        # High-revision signal → Scout: deprioritize combinations that burn
+        # multiple revision rounds (category + intent_template).
+        revision_count = getattr(article, "revision_count", 0) or 0
+        if decision in ("revision", "rejected") and revision_count >= 2:
+            if article.content_category:
+                self.record_lesson(
+                    "scout", "revision_prone_category",
+                    article.content_category,
+                )
+            intent = (getattr(article, "intent_template", "") or "").strip()
+            if intent:
+                self.record_lesson(
+                    "scout", "revision_prone_intent",
+                    intent,
+                )
+
     @staticmethod
     def _normalize_issue(issue: str) -> str:
         """Normalize issue text for consistent matching across articles.
