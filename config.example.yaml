@@ -73,6 +73,15 @@ pipeline:
   quill_use_strategy_on_high_trust_only: true
   quill_enable_contrastive_critique: false
   sage_deep_fact_check_on_high_trust_only: true
+  quill_use_fact_pack: true
+  quill_use_winner_memory: true
+  scout_enable_intent_templates: true
+  scout_enable_cluster_map: true
+  ezra_strict_publish_gate: true
+  refresh_age_days: 30
+  refresh_position_threshold: 12
+  refresh_clicks_threshold: 3
+  monthly_refresh_cap: 8
 
 # New agents (NextLevel features)
 atlas:

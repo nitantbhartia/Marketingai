@@ -101,6 +101,23 @@ class EzraAgent(BaseAgent):
 
         return results
 
+    @staticmethod
+    def _product_info(article) -> dict[str, str]:
+        product = (getattr(article, "product", "") or "claimcoach").strip().lower()
+        if product == "medbill":
+            return {
+                "product": "medbill",
+                "brand": "BillScan",
+                "site_url": "https://billscan.app",
+                "tools_url": "https://billscan.app/tools",
+            }
+        return {
+            "product": "claimcoach",
+            "brand": "ClaimCoach",
+            "site_url": "https://claimcoach.app",
+            "tools_url": "https://claimcoach.app/tools",
+        }
+
     def _publish_article(self, article) -> dict[str, Any]:
         """Publish single article to static files."""
 
@@ -208,11 +225,33 @@ class EzraAgent(BaseAgent):
                     "error": f"{remaining_placeholders} unresolved image placeholders",
                 }
 
+            if getattr(self.config.pipeline, "ezra_strict_publish_gate", True):
+                gate_errors = self._strict_publish_gate(article)
+                if gate_errors:
+                    self.db.update_article(
+                        article_id,
+                        status=ArticleStatus.REVISION.value,
+                        publisher_claim="",
+                        revision_notes=(
+                            (article.revision_notes or "")
+                            + "\n\n[EZRA STRICT GATE] Publish blocked:\n- "
+                            + "\n- ".join(gate_errors[:12])
+                        ),
+                        validation_status="FAIL",
+                    )
+                    return {
+                        "article_id": article_id,
+                        "success": False,
+                        "error": "Strict publish gate failed",
+                        "gate_errors": gate_errors[:12],
+                    }
+
             # Save markdown file
             markdown_path = self._save_markdown(article, slug)
 
             # Generate CTA variants
             cta_variants = self._generate_cta_variants(article)
+            self._persist_cta_variants(article_id, cta_variants)
 
             # Generate HTML file with CTAs
             html_path = self._generate_html(article, slug, cta_variants)
@@ -221,7 +260,8 @@ class EzraAgent(BaseAgent):
             self._update_index(article, slug)
 
             # Determine URL (normalize trailing slash)
-            published_url = f"{self.site_url.rstrip('/')}/blog/{slug}"
+            product_info = self._product_info(article)
+            published_url = f"{product_info['site_url'].rstrip('/')}/blog/{slug}"
 
             # Update database
             self.db.update_article(
@@ -295,6 +335,109 @@ class EzraAgent(BaseAgent):
 
         return article
 
+    def _strict_publish_gate(self, article) -> list[str]:
+        """Hard quality gate before publishing."""
+        errors: list[str] = []
+        text = article.markdown_content or ""
+        lower = text.lower()
+        word_count = len(text.split())
+
+        # 1) Minimum depth
+        if word_count < 900:
+            errors.append(f"Article too short for publish gate ({word_count} words, min 900)")
+
+        # 2) FAQ + schema requirements
+        has_faq = ("## faq" in lower) or ("frequently asked questions" in lower)
+        if not has_faq:
+            errors.append("Missing FAQ section")
+        if '"@type": "Article"' not in text and '"@type":"Article"' not in text:
+            errors.append("Missing Article JSON-LD schema")
+        if has_faq and "FAQPage" not in text:
+            errors.append("FAQ exists but FAQPage schema missing")
+
+        # 3) Citation density for factual claims
+        citation_links = re.findall(r"\[[^\]]+\]\(https?://[^)]+\)", text)
+        if len(citation_links) < 3:
+            errors.append("Insufficient inline citations (<3 source links)")
+
+        numeric_claims = len(re.findall(r"\b\d+(?:\.\d+)?%?\b", text))
+        if numeric_claims >= 8 and len(citation_links) < 5:
+            errors.append("Numeric claim density high but citation count too low")
+
+        # 4) Product/domain consistency
+        info = self._product_info(article)
+        wrong_domain = "billscan.app" if info["product"] == "claimcoach" else "claimcoach.app"
+        if wrong_domain in lower:
+            errors.append(f"Cross-product domain leak detected ({wrong_domain})")
+
+        # 5) Require tools for calculator/threshold intent
+        tool_required_terms = (
+            "calculator", "threshold", "estimate", "fair", "value", "settlement",
+            "anesthesia", "itemized", "dispute",
+        )
+        kw = (article.target_keyword or "").lower()
+        tool_needed = any(t in kw for t in tool_required_terms)
+        has_tool_embed = ("<!-- TOOL:" in text) or ('data-cc-tool="' in text)
+        if tool_needed and not has_tool_embed:
+            errors.append("Tool embed required for this keyword intent")
+
+        return errors
+
+    def _persist_cta_variants(self, article_id: int, variants: list[dict[str, str]]) -> None:
+        """Persist generated CTA variants for experimentation tracking."""
+        if not variants:
+            return
+        try:
+            with self.db._connect() as conn:
+                for cta in variants:
+                    text = f"{cta.get('heading', '').strip()} | {cta.get('text', '').strip()}".strip(" |")
+                    if not text:
+                        continue
+                    conn.execute(
+                        """
+                        INSERT INTO cta_variants (article_id, cta_text, cta_type, position, is_active)
+                        VALUES (?, ?, ?, ?, 1)
+                        """,
+                        (
+                            article_id,
+                            text[:700],
+                            cta.get("type", "unknown"),
+                            cta.get("position", "unknown"),
+                        ),
+                    )
+        except Exception:
+            # Non-blocking: CTA tracking should not fail publishing.
+            self.logger.debug("Skipping CTA variant persistence", exc_info=True)
+
+    def _best_historical_cta(self, product: str, cta_type: str) -> dict[str, str] | None:
+        """Fetch best historical CTA copy for a product/type to bias A/B generation."""
+        try:
+            with self.db._connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT cta_text, impressions, clicks, conversions
+                    FROM cta_variants v
+                    JOIN articles a ON a.id = v.article_id
+                    WHERE COALESCE(a.product, 'claimcoach') = ?
+                      AND v.cta_type = ?
+                      AND v.impressions >= 20
+                    ORDER BY
+                      (CASE WHEN v.clicks > 0 THEN CAST(v.conversions AS REAL) / v.clicks ELSE 0 END) DESC,
+                      (CASE WHEN v.impressions > 0 THEN CAST(v.clicks AS REAL) / v.impressions ELSE 0 END) DESC,
+                      v.clicks DESC
+                    LIMIT 1
+                    """,
+                    (product, cta_type),
+                ).fetchone()
+            if not row:
+                return None
+            parts = (row["cta_text"] or "").split("|", 1)
+            heading = parts[0].strip() if parts else ""
+            body = parts[1].strip() if len(parts) > 1 else ""
+            return {"heading": heading, "text": body}
+        except Exception:
+            return None
+
     def _save_markdown(self, article, slug: str) -> Path:
         """Save article as markdown file."""
 
@@ -303,6 +446,10 @@ class EzraAgent(BaseAgent):
             "description": article.meta_description or "",
             "keyword": article.target_keyword or "",
             "state": article.target_state or "",
+            "product": (article.product or "claimcoach"),
+            "intent_template": getattr(article, "intent_template", "") or "",
+            "cluster_key": getattr(article, "cluster_key", "") or "",
+            "canonical_target": getattr(article, "canonical_url", "") or "",
             "slug": slug,
             "date": datetime.now().isoformat(),
         }
@@ -322,66 +469,73 @@ class EzraAgent(BaseAgent):
         """Generate personalized CTA variants based on article content."""
         state = article.target_state or ""
         keyword = article.target_keyword or ""
+        info = self._product_info(article)
+        product = info["product"]
+        brand = info["brand"]
+        site_url = info["site_url"]
+        tools_url = info["tools_url"]
 
         variants = []
 
         # Primary CTA - State-specific if available
+        winner_primary = self._best_historical_cta(product, "primary")
         if state:
             variants.append({
                 "type": "primary",
                 "position": "sidebar",
-                "heading": f"Get Your Free {state} Settlement Analysis",
-                "text": f"See if your {state} total loss offer is fair in under 5 minutes.",
-                "button_text": "Analyze Your Offer",
-                "button_url": "https://claimcoach.app",
+                "heading": winner_primary.get("heading") if winner_primary else f"Get Your Free {state} Analysis",
+                "text": winner_primary.get("text") if winner_primary else f"See if your {state} {keyword} offer is fair in under 5 minutes.",
+                "button_text": "Analyze Now",
+                "button_url": site_url,
             })
         else:
             variants.append({
                 "type": "primary",
                 "position": "sidebar",
-                "heading": "Get Your Free Settlement Analysis",
-                "text": "Find out if your total loss offer is fair in under 5 minutes.",
-                "button_text": "Analyze Your Offer",
-                "button_url": "https://claimcoach.app",
+                "heading": winner_primary.get("heading") if winner_primary else f"Get Your Free {brand} Analysis",
+                "text": winner_primary.get("text") if winner_primary else "Find missed line items and next-best dispute actions in minutes.",
+                "button_text": "Analyze Now",
+                "button_url": site_url,
             })
 
         # Secondary CTA - Content-aware
+        winner_secondary = self._best_historical_cta(product, "secondary")
         if "settlement" in keyword.lower():
             variants.append({
                 "type": "secondary",
                 "position": "inline",
-                "heading": "Not Sure If Your Offer Is Fair?",
-                "text": "Our free calculator compares your offer to actual market values.",
+                "heading": winner_secondary.get("heading") if winner_secondary else "Not Sure If Your Offer Is Fair?",
+                "text": winner_secondary.get("text") if winner_secondary else "Use a fast benchmark check before accepting anything.",
                 "button_text": "Check Your Settlement",
-                "button_url": "https://claimcoach.app/calculator",
+                "button_url": tools_url,
             })
         elif "total loss" in keyword.lower():
             variants.append({
                 "type": "secondary",
                 "position": "inline",
-                "heading": "Declared a Total Loss?",
-                "text": "Get a detailed breakdown of what your vehicle is actually worth.",
-                "button_text": "Get Your Valuation",
-                "button_url": "https://claimcoach.app",
+                "heading": winner_secondary.get("heading") if winner_secondary else "Declared a Total Loss?",
+                "text": winner_secondary.get("text") if winner_secondary else "Get a structured valuation review before you negotiate.",
+                "button_text": "Check Valuation",
+                "button_url": site_url,
             })
         else:
             variants.append({
                 "type": "secondary",
                 "position": "inline",
-                "heading": "Questions About Your Claim?",
-                "text": "Our free tool analyzes your settlement and shows what you may be missing.",
-                "button_text": "Check Your Settlement",
-                "button_url": "https://claimcoach.app",
+                "heading": winner_secondary.get("heading") if winner_secondary else "Need a Faster Answer?",
+                "text": winner_secondary.get("text") if winner_secondary else "Run a guided check to find errors and best next steps.",
+                "button_text": "Run Free Check",
+                "button_url": site_url,
             })
 
         # Bottom CTA - Newsletter signup
         variants.append({
             "type": "newsletter",
             "position": "bottom",
-            "heading": "Insurance Tips in Your Inbox",
-            "text": "Get weekly tips on navigating total loss claims and maximizing settlements.",
+            "heading": f"{brand} Tips in Your Inbox",
+            "text": "Get practical weekly guidance and dispute playbooks.",
             "button_text": "Subscribe Free",
-            "button_url": "https://claimcoach.app/newsletter",
+            "button_url": f"{site_url}/newsletter",
         })
 
         # Context-aware CTA — identify the high-intent moment and inject
@@ -395,9 +549,9 @@ class EzraAgent(BaseAgent):
     def _generate_context_aware_cta(self, article) -> dict[str, str] | None:
         """Use Flash-Lite to find the high-intent moment and create a matching CTA.
 
-        Identifies where the reader feels most frustrated with their insurance
-        company and generates a CTA that speaks directly to that emotion,
-        linking to the most relevant ClaimCoach feature.
+        Identifies where the reader feels most frustrated and generates a CTA
+        that speaks directly to that emotion, linking to the most relevant
+        product feature.
 
         Returns a CTA dict or None if generation fails.
         """
@@ -409,21 +563,25 @@ class EzraAgent(BaseAgent):
             return None
 
         keyword = article.target_keyword or ""
+        info = self._product_info(article)
+        brand = info["brand"]
+        site_url = info["site_url"]
+        tools_url = info["tools_url"]
 
-        prompt = f"""You are a conversion rate optimization expert for ClaimCoach (claimcoach.app),
-an AI tool that analyzes total loss insurance settlements.
+        prompt = f"""You are a conversion rate optimization expert for {brand} ({site_url}),
+an AI tool that helps users analyze and challenge unfair billing/settlement outcomes.
 
 Read this article about "{keyword}" and identify the HIGH-INTENT MOMENT — the paragraph
 where the reader feels MOST frustrated with their insurance company and most likely to take action.
 
 Then create a context-aware CTA that:
 1. Mirrors the specific frustration in that paragraph
-2. Offers ClaimCoach as the immediate next step
+2. Offers the product as the immediate next step
 3. Is 1 sentence for the heading, 1-2 sentences for the body text
 
-ClaimCoach features you can link to:
-- https://claimcoach.app — main settlement analyzer
-- https://claimcoach.app/calculator — free settlement calculator
+Available URLs:
+- {site_url} — main analyzer
+- {tools_url} — tools and calculators
 
 Respond in EXACTLY this format:
 INSERT_AFTER: [quote the H2 heading this CTA should appear after]
@@ -459,11 +617,11 @@ Article:
                     cta["button_text"] = line.split(":", 1)[1].strip()
                 elif line.startswith("URL:"):
                     url = line.split(":", 1)[1].strip()
-                    # Only allow claimcoach.app URLs
-                    if "claimcoach.app" in url:
+                    # Only allow same-product URLs
+                    if info["site_url"].replace("https://", "") in url:
                         cta["button_url"] = url
                     else:
-                        cta["button_url"] = "https://claimcoach.app"
+                        cta["button_url"] = info["site_url"]
 
             # Validate all required fields are present
             required = {"heading", "text", "button_text", "button_url"}
@@ -483,6 +641,7 @@ Article:
 
     def _generate_html(self, article, slug: str, cta_variants: list[dict[str, str]]) -> Path:
         """Generate HTML from markdown."""
+        info = self._product_info(article)
 
         html_content = markdown.markdown(
             article.markdown_content,
@@ -555,7 +714,7 @@ Article:
 <body>
     <header>
         <nav>
-            <a href="/">ClaimCoach</a>
+            <a href="/">{{ brand_name }}</a>
             <a href="/blog">Blog</a>
         </nav>
     </header>
@@ -596,7 +755,7 @@ Article:
     {% endif %}
 
     <footer>
-        <p>&copy; {{ year }} ClaimCoach. All rights reserved.</p>
+        <p>&copy; {{ year }} {{ brand_name }}. All rights reserved.</p>
     </footer>
     {% if has_tools %}
     <script id="cc-tool-data" type="application/json">{{ tool_data_json | safe }}</script>
@@ -614,7 +773,7 @@ Article:
         if img_match:
             og_image = img_match.group(1)
 
-        canonical_url = f"{self.site_url.rstrip('/')}/blog/{slug}"
+        canonical_url = f"{info['site_url'].rstrip('/')}/blog/{slug}"
 
         # Check if article has embedded interactive tools
         has_tools = "data-cc-tool" in html_content
@@ -639,6 +798,7 @@ Article:
             secondary_cta=secondary_cta,
             newsletter_cta=newsletter_cta,
             year=datetime.now().year,
+            brand_name=info["brand"],
             has_tools=has_tools,
             tool_data_json=tool_data_json,
         )

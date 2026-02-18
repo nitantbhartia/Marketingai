@@ -82,6 +82,20 @@ def init_database():
                 refresh_priority TEXT,
                 cannibalization_flag BOOLEAN DEFAULT 0,
 
+                -- Pipeline planning fields
+                content_brief TEXT DEFAULT '',
+                search_volume INTEGER DEFAULT 0,
+                keyword_difficulty REAL DEFAULT 0.0,
+                commercial_intent REAL DEFAULT 0.0,
+                content_category TEXT DEFAULT '',
+                intent_template TEXT DEFAULT '',
+                cluster_key TEXT DEFAULT '',
+                canonical_url TEXT DEFAULT '',
+                fact_pack TEXT DEFAULT '',
+                suggested_title TEXT DEFAULT '',
+                internal_links TEXT DEFAULT '[]',
+                external_links TEXT DEFAULT '[]',
+
                 -- Timestamps
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -261,6 +275,10 @@ def _run_migrations(db):
             "keyword_difficulty": "REAL DEFAULT 0.0",
             "commercial_intent": "REAL DEFAULT 0.0",
             "content_category": "TEXT DEFAULT ''",
+            "intent_template": "TEXT DEFAULT ''",
+            "cluster_key": "TEXT DEFAULT ''",
+            "canonical_url": "TEXT DEFAULT ''",
+            "fact_pack": "TEXT DEFAULT ''",
             "suggested_title": "TEXT DEFAULT ''",
             "internal_links": "TEXT DEFAULT '[]'",
             "external_links": "TEXT DEFAULT '[]'",

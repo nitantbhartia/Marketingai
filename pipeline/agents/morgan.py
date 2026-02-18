@@ -30,6 +30,7 @@ class MorganAgent(BaseAgent):
         checks["publishing_cadence"] = self._check_publishing_cadence()
         checks["social_amplification"] = self._check_social_amplification()
         checks["quality_trends"] = self._check_quality_trends()
+        checks["refresh_queue"] = self._queue_decay_refreshes()
 
         # Distill cross-agent lessons from performance data
         checks["learning"] = self._distill_performance_lessons()
@@ -319,6 +320,107 @@ class MorganAgent(BaseAgent):
         else:
             result["status"] = "no_data"
 
+        return result
+
+    def _queue_decay_refreshes(self) -> dict:
+        """Queue stale published articles for refresh as new backlog items."""
+        now = datetime.now(timezone.utc)
+        age_days = max(7, int(getattr(self.config.pipeline, "refresh_age_days", 30)))
+        pos_threshold = float(getattr(self.config.pipeline, "refresh_position_threshold", 12.0))
+        clicks_threshold = int(getattr(self.config.pipeline, "refresh_clicks_threshold", 3))
+        monthly_cap = max(1, int(getattr(self.config.pipeline, "monthly_refresh_cap", 8)))
+
+        since_30d = (now - timedelta(days=30)).isoformat()
+        recent_refresh_events = self.db.get_metrics(name="refresh_queued", since=since_30d, limit=2000)
+        queued_recently = len(recent_refresh_events)
+        remaining = max(0, monthly_cap - queued_recently)
+
+        result: dict[str, Any] = {
+            "monthly_cap": monthly_cap,
+            "queued_last_30d": queued_recently,
+            "queued_now": 0,
+        }
+        if remaining <= 0:
+            result["status"] = "cap_reached"
+            return result
+
+        published = self.db.query_articles(status=ArticleStatus.DONE.value, limit=500)
+        existing_refresh = self.db.query_articles(status=ArticleStatus.BACKLOG.value, limit=500)
+        refresh_keywords = {
+            (a.target_keyword or "").strip().lower()
+            for a in existing_refresh
+            if (a.content_category or "").strip().lower() == "refresh"
+        }
+
+        candidates = []
+        for a in published:
+            if not a.published_at:
+                continue
+            pub_dt = self.db._parse_ts(a.published_at)  # internal helper is UTC-safe
+            if not pub_dt:
+                continue
+            if (now - pub_dt).days < age_days:
+                continue
+            clicks = int(a.last_gsc_clicks or 0)
+            pos = float(a.last_gsc_position or 100.0)
+            if clicks > clicks_threshold and pos < pos_threshold:
+                continue
+            candidates.append((clicks, pos, a))
+
+        # Highest leverage first: near-page-one with low clicks, then old low-perf.
+        candidates.sort(key=lambda item: (item[1], item[0], item[2].published_at or ""), reverse=False)
+
+        for _, _, article in candidates[:remaining]:
+            kw = (article.target_keyword or "").strip()
+            if not kw:
+                continue
+            if kw.lower() in refresh_keywords:
+                continue
+            refresh_brief = (
+                "Refresh an existing published article based on decay/performance signals.\n"
+                f"Source URL: {article.published_url or ''}\n"
+                f"Keyword: {kw}\n"
+                f"Current GSC snapshot: position={article.last_gsc_position or 'NA'}, "
+                f"clicks={article.last_gsc_clicks or 0}\n"
+                "- Keep canonical intent and URL target aligned.\n"
+                "- Update stale facts/citations and improve conversion sections.\n"
+            )
+            self.db.create_article(
+                product=article.product or "claimcoach",
+                title=f"[Refresh] {article.title or kw.title()}",
+                target_keyword=kw,
+                target_state=article.target_state or "",
+                status=ArticleStatus.BACKLOG.value,
+                content_category="refresh",
+                intent_template=article.intent_template or "general_guide",
+                cluster_key=article.cluster_key or "",
+                canonical_url=article.published_url or article.canonical_url or "",
+                fact_pack=article.fact_pack or "",
+                content_brief=refresh_brief,
+                refresh_priority="HIGH",
+                commercial_intent=article.commercial_intent or 0.8,
+                search_volume=article.search_volume or 0,
+                keyword_difficulty=article.keyword_difficulty or 0.0,
+            )
+            self.db.record_metric(
+                "refresh_queued",
+                1,
+                json.dumps(
+                    {
+                        "source_article_id": article.id,
+                        "keyword": kw,
+                        "position": article.last_gsc_position,
+                        "clicks": article.last_gsc_clicks,
+                    }
+                ),
+            )
+            refresh_keywords.add(kw.lower())
+            result["queued_now"] += 1
+
+        if result["queued_now"] > 0:
+            result["status"] = "queued"
+        else:
+            result["status"] = "none_needed"
         return result
 
     def _distill_performance_lessons(self) -> dict:

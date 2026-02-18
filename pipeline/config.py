@@ -128,6 +128,15 @@ class PipelineSettings:
     quill_use_strategy_on_high_trust_only: bool = True
     quill_enable_contrastive_critique: bool = False
     sage_deep_fact_check_on_high_trust_only: bool = True
+    quill_use_fact_pack: bool = True
+    quill_use_winner_memory: bool = True
+    scout_enable_intent_templates: bool = True
+    scout_enable_cluster_map: bool = True
+    ezra_strict_publish_gate: bool = True
+    refresh_age_days: int = 30
+    refresh_position_threshold: float = 12.0
+    refresh_clicks_threshold: int = 3
+    monthly_refresh_cap: int = 8
 
 
 @dataclass

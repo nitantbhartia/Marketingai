@@ -43,6 +43,21 @@ class ScoutAgent(BaseAgent):
         "west virginia", "wisconsin", "wyoming",
     }
 
+    @staticmethod
+    def _product_info(product: str) -> dict[str, str]:
+        p = (product or "claimcoach").strip().lower()
+        if p == "medbill":
+            return {
+                "product": "medbill",
+                "brand": "BillScan",
+                "site_url": "https://billscan.app",
+            }
+        return {
+            "product": "claimcoach",
+            "brand": "ClaimCoach",
+            "site_url": "https://claimcoach.app",
+        }
+
     def run(self) -> dict[str, Any]:
         """Research topics and populate backlog."""
         existing_count = self.db.count_articles(ArticleStatus.BACKLOG.value)
@@ -59,6 +74,7 @@ class ScoutAgent(BaseAgent):
                 continue
             tokens = self._intent_tokens(kw)
             cluster = self._cluster_key(kw)
+            product = (getattr(a, "product", "") or "claimcoach").strip().lower()
             primary = self._primary_url_for_article(a)
             intent_index.append(
                 {
@@ -66,11 +82,13 @@ class ScoutAgent(BaseAgent):
                     "tokens": tokens,
                     "cluster": cluster,
                     "state": (a.target_state or self._state_hint(kw)),
+                    "product": product,
                     "primary_url": primary,
                 }
             )
-            if cluster and primary and cluster not in cluster_primary:
-                cluster_primary[cluster] = primary
+            cluster_id = f"{product}:{cluster}" if cluster else ""
+            if cluster_id and primary and cluster_id not in cluster_primary:
+                cluster_primary[cluster_id] = primary
 
         products = list(getattr(self.config.pipeline, "products", ["claimcoach"]))
         if not products:
@@ -86,10 +104,13 @@ class ScoutAgent(BaseAgent):
 
         for topic in topics:
             kw = topic["keyword"]
+            product = (topic.get("product", "claimcoach") or "claimcoach").strip().lower()
             if kw.lower() in existing_keywords:
                 skipped_duplicates += 1
                 continue
-            conflict = self._find_cannibalization_conflict(kw, topic.get("state", ""), intent_index)
+            conflict = self._find_cannibalization_conflict(
+                kw, topic.get("state", ""), intent_index, target_product=product
+            )
             if conflict:
                 logger.info(
                     f"Skipping '{kw}' — cannibalizes cluster '{conflict['cluster']}' "
@@ -99,16 +120,37 @@ class ScoutAgent(BaseAgent):
                 continue
 
             cluster = self._cluster_key(kw)
-            primary_url = cluster_primary.get(cluster)
+            cluster_id = f"{product}:{cluster}" if cluster else ""
+            primary_url = cluster_primary.get(cluster_id)
             if not primary_url:
-                primary_url = self._default_primary_url(kw)
-                cluster_primary[cluster] = primary_url
+                primary_url = self._default_primary_url(kw, product=product)
+                if cluster_id:
+                    cluster_primary[cluster_id] = primary_url
+
+            intent_template = self._infer_intent_template(
+                keyword=kw,
+                category=topic.get("category", ""),
+                product=product,
+            )
+            fact_pack = self._build_fact_pack(
+                keyword=kw,
+                category=topic.get("category", ""),
+                state=topic.get("state", ""),
+                product=product,
+            )
 
             # Generate content brief
-            brief = self._generate_brief(topic, cluster, primary_url)
+            brief = self._generate_brief(
+                topic,
+                cluster,
+                primary_url,
+                intent_template=intent_template,
+                fact_pack=fact_pack,
+                product=product,
+            )
 
             self.db.create_article(
-                product=topic.get("product", "claimcoach"),
+                product=product,
                 title=topic.get("suggested_title", ""),
                 status=ArticleStatus.BACKLOG.value,
                 target_keyword=kw,
@@ -116,6 +158,10 @@ class ScoutAgent(BaseAgent):
                 keyword_difficulty=topic.get("difficulty", 0.0),
                 commercial_intent=topic.get("intent", 0.0),
                 content_brief=brief,
+                fact_pack=fact_pack,
+                intent_template=intent_template,
+                cluster_key=cluster,
+                canonical_url=primary_url,
                 target_state=topic.get("state", ""),
                 content_category=topic.get("category", ""),
                 suggested_title=self._suggest_title(kw, topic.get("category", "")),
@@ -127,6 +173,7 @@ class ScoutAgent(BaseAgent):
                     "tokens": self._intent_tokens(kw),
                     "cluster": cluster,
                     "state": topic.get("state", "") or self._state_hint(kw),
+                    "product": product,
                     "primary_url": primary_url,
                 }
             )
@@ -160,27 +207,42 @@ class ScoutAgent(BaseAgent):
                     continue
                 if not self._is_relevant(kw):
                     continue
-                conflict = self._find_cannibalization_conflict(kw, "", intent_index)
+                inferred_product = "medbill" if any(
+                    t in kw.lower()
+                    for t in (
+                        "medical bill", "hospital bill", "anesthesia",
+                        "lab bill", "no surprises", "er bill",
+                    )
+                ) else "claimcoach"
+                conflict = self._find_cannibalization_conflict(
+                    kw, "", intent_index, target_product=inferred_product
+                )
                 if conflict:
                     skipped_cannibal += 1
                     continue
 
                 cluster = self._cluster_key(kw)
-                primary_url = cluster_primary.get(cluster)
+                cluster_id = f"{inferred_product}:{cluster}" if cluster else ""
+                primary_url = cluster_primary.get(cluster_id)
                 if not primary_url:
-                    primary_url = self._default_primary_url(kw)
-                    cluster_primary[cluster] = primary_url
+                    primary_url = self._default_primary_url(kw, product=inferred_product)
+                    if cluster_id:
+                        cluster_primary[cluster_id] = primary_url
+
+                intent_template = self._infer_intent_template(
+                    keyword=kw, category="discovered", product=inferred_product
+                )
+                fact_pack = self._build_fact_pack(
+                    keyword=kw, category="discovered", state="", product=inferred_product
+                )
 
                 brief = (
                     f"Write a comprehensive guide about: {kw}\n\n"
+                    f"Intent template: {intent_template}\n"
                     f"Cluster key: {cluster}\n"
                     f"Primary URL for this cluster: {primary_url}\n"
                     "Do not cannibalize the primary URL intent."
                 )
-
-                inferred_product = "medbill" if any(
-                    t in kw.lower() for t in ("medical bill", "hospital bill", "anesthesia", "lab bill", "no surprises")
-                ) else "claimcoach"
                 self.db.create_article(
                     product=inferred_product,
                     status=ArticleStatus.BACKLOG.value,
@@ -189,6 +251,10 @@ class ScoutAgent(BaseAgent):
                     keyword_difficulty=0.25,
                     commercial_intent=0.7,
                     content_brief=brief,
+                    fact_pack=fact_pack,
+                    intent_template=intent_template,
+                    cluster_key=cluster,
+                    canonical_url=primary_url,
                     content_category="discovered",
                     suggested_title=self._suggest_title(kw, "discovered"),
                 )
@@ -199,6 +265,7 @@ class ScoutAgent(BaseAgent):
                         "tokens": self._intent_tokens(kw),
                         "cluster": cluster,
                         "state": self._state_hint(kw),
+                        "product": inferred_product,
                         "primary_url": primary_url,
                     }
                 )
@@ -230,18 +297,41 @@ class ScoutAgent(BaseAgent):
                     continue
                 try:
                     cluster = self._cluster_key(article.target_keyword or "")
-                    primary_url = cluster_primary.get(cluster) or self._default_primary_url(article.target_keyword or "")
-                    cluster_primary[cluster] = primary_url
+                    product = (article.product or "claimcoach").strip().lower()
+                    cluster_id = f"{product}:{cluster}" if cluster else ""
+                    primary_url = cluster_primary.get(cluster_id) or self._default_primary_url(
+                        article.target_keyword or "", product=product
+                    )
+                    if cluster_id:
+                        cluster_primary[cluster_id] = primary_url
+                    intent_template = self._infer_intent_template(
+                        keyword=article.target_keyword or "",
+                        category=article.content_category or "",
+                        product=product,
+                    )
+                    fact_pack = self._build_fact_pack(
+                        keyword=article.target_keyword or "",
+                        category=article.content_category or "",
+                        state=article.target_state or "",
+                        product=product,
+                    )
                     brief = self._ai_generate_brief(
                         article.target_keyword,
                         article.content_category,
                         cluster_key=cluster,
                         primary_url=primary_url,
+                        intent_template=intent_template,
+                        fact_pack=fact_pack,
+                        product=product,
                     )
                     title = self._ai_suggest_title(article.target_keyword)
                     self.db.update_article(
                         article.id,
                         content_brief=brief,
+                        fact_pack=fact_pack,
+                        intent_template=intent_template,
+                        cluster_key=cluster,
+                        canonical_url=primary_url,
                         title=title,
                     )
                     briefed += 1
@@ -318,17 +408,26 @@ class ScoutAgent(BaseAgent):
             int(getattr(article, "id", 0) or 0),
         )
 
-    def _generate_brief(self, topic: dict, cluster_key: str, primary_url: str) -> str:
+    def _generate_brief(
+        self,
+        topic: dict,
+        cluster_key: str,
+        primary_url: str,
+        intent_template: str = "",
+        fact_pack: str = "",
+        product: str = "claimcoach",
+    ) -> str:
         """Generate a content brief from topic data."""
         category = topic.get("category", "")
         kw = topic["keyword"]
+        info = self._product_info(product)
 
         briefs = {
             "problem_aware": (
                 f"Write an empathetic, educational article targeting people who just "
                 f"discovered their insurance settlement is too low. Focus on '{kw}'. "
                 f"Validate their frustration, explain why this happens, and introduce "
-                f"actionable steps they can take. End with ClaimCoach CTA."
+                f"actionable steps they can take. End with a {info['brand']} CTA."
             ),
             "solution_aware": (
                 f"Write a detailed how-to guide for '{kw}'. Include step-by-step "
@@ -368,7 +467,22 @@ class ScoutAgent(BaseAgent):
             f"- Primary URL for this intent cluster: {primary_url}\n"
             "- This article must target a distinct intent and avoid cannibalizing the primary URL.\n"
         )
-        return base + cluster_block
+        intent_block = (
+            "\nIntent template:\n"
+            f"- {intent_template}\n"
+            "- Match this query intent exactly; do not drift into generic explainer mode.\n"
+        ) if intent_template else ""
+        fact_block = (
+            "\nPre-write fact pack:\n"
+            f"{fact_pack}\n"
+            "- Use these sources for legal/numeric/timeline claims.\n"
+        ) if fact_pack else ""
+        brand_block = (
+            "\nBrand + product context:\n"
+            f"- Product: {info['brand']}\n"
+            f"- Primary domain: {info['site_url']}\n"
+        )
+        return base + brand_block + intent_block + cluster_block + fact_block
 
     def _suggest_title(self, keyword: str, category: str) -> str:
         """Generate a suggested article title."""
@@ -390,6 +504,8 @@ class ScoutAgent(BaseAgent):
             "total loss", "settlement", "insurance", "claim", "adjuster",
             "lowball", "dispute", "totaled", "car value", "diminished",
             "payout", "offer", "vehicle", "accident",
+            "medical bill", "hospital bill", "anesthesia", "lab bill",
+            "charity care", "no surprises", "er bill", "itemized bill",
         ]
         kw_lower = keyword.lower()
         return any(term in kw_lower for term in relevant_terms)
@@ -414,22 +530,30 @@ class ScoutAgent(BaseAgent):
             return ""
         return "-".join(tokens[:4])
 
-    @staticmethod
-    def _default_primary_url(keyword: str) -> str:
+    def _default_primary_url(self, keyword: str, product: str = "claimcoach") -> str:
         slug = re.sub(r"[^a-z0-9\s-]", "", keyword.lower())
         slug = re.sub(r"[\s]+", "-", slug).strip("-")
-        return f"https://claimcoach.app/blog/{slug[:80]}"
+        info = self._product_info(product)
+        return f"{info['site_url'].rstrip('/')}/blog/{slug[:80]}"
 
     def _primary_url_for_article(self, article) -> str:
+        if getattr(article, "canonical_url", ""):
+            return article.canonical_url
         if article.published_url:
             return article.published_url
         if article.slug:
-            return f"https://claimcoach.app/blog/{article.slug}"
+            info = self._product_info(getattr(article, "product", "claimcoach"))
+            return f"{info['site_url'].rstrip('/')}/blog/{article.slug}"
         kw = article.target_keyword or article.title or ""
-        return self._default_primary_url(kw) if kw else ""
+        product = getattr(article, "product", "claimcoach")
+        return self._default_primary_url(kw, product=product) if kw else ""
 
     def _find_cannibalization_conflict(
-        self, keyword: str, target_state: str, intent_index: list[dict]
+        self,
+        keyword: str,
+        target_state: str,
+        intent_index: list[dict],
+        target_product: str = "claimcoach",
     ) -> dict | None:
         """Return conflicting intent-cluster entry if keyword overlaps existing intent."""
         kw = (keyword or "").strip().lower()
@@ -441,12 +565,17 @@ class ScoutAgent(BaseAgent):
             return None
         cluster = self._cluster_key(kw)
         state = (target_state or self._state_hint(kw) or "").lower()
+        target_product = (target_product or "claimcoach").lower()
 
         for ex in intent_index:
             ex_kw = ex.get("keyword", "")
             ex_tokens = ex.get("tokens", set())
             ex_cluster = ex.get("cluster", "")
             ex_state = (ex.get("state") or "").lower()
+            ex_product = (ex.get("product") or "claimcoach").lower()
+
+            if ex_product != target_product:
+                continue
 
             if kw == ex_kw:
                 return ex
@@ -467,6 +596,63 @@ class ScoutAgent(BaseAgent):
                 return ex
 
         return None
+
+    def _infer_intent_template(self, keyword: str, category: str, product: str) -> str:
+        """Classify keyword into a practical SERP-intent template."""
+        kw = (keyword or "").lower()
+        category = (category or "").lower()
+        if any(t in kw for t in ("how to", "step", "dispute", "challenge", "appeal")):
+            return "dispute_how_to"
+        if any(t in kw for t in ("calculator", "estimate", "worth", "value", "threshold")):
+            return "calculator_intent"
+        if any(t in kw for t in ("law", "statute", "rule", "regulation", "rights")):
+            return "law_threshold"
+        if any(t in kw for t in ("negotiate", "negotiation", "counteroffer", "script")):
+            return "negotiation_script"
+        if category in {"state_specific", "line_item"}:
+            return "law_threshold"
+        if product == "medbill":
+            return "negotiation_script"
+        return "general_guide"
+
+    def _build_fact_pack(
+        self,
+        keyword: str,
+        category: str,
+        state: str,
+        product: str,
+    ) -> str:
+        """Build a deterministic pre-write factual source pack."""
+        info = self._product_info(product)
+        state_hint = (state or self._state_hint(keyword) or "").strip()
+        lines = [
+            f"- Product: {info['brand']} ({info['site_url']})",
+            f"- Intent category: {category or 'general'}",
+        ]
+        if product == "medbill":
+            lines.extend(
+                [
+                    "- Core sources:",
+                    "  - CMS: https://www.cms.gov/",
+                    "  - CMS No Surprises: https://www.cms.gov/nosurprises",
+                    "  - HHS consumer guidance: https://www.hhs.gov/",
+                    "  - IRS 501(r): https://www.irs.gov/charities-non-profits/charitable-organizations/requirements-for-501c3-hospitals-under-the-affordable-care-act-section-501r",
+                    "- Numeric/legal/timeline claims must cite one of these or equivalent primary source.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "- Core sources:",
+                    "  - NAIC consumer portal: https://content.naic.org/consumer",
+                    "  - State DOI directory: https://content.naic.org/state-insurance-departments",
+                    "  - NHTSA: https://www.nhtsa.gov/",
+                    "- Numeric/legal/timeline claims must cite state statutes or primary regulator pages.",
+                ]
+            )
+        if state_hint:
+            lines.append(f"- State focus: {state_hint} (add direct state regulator/statute links in draft)")
+        return "\n".join(lines)
 
     def _load_performance_hints(self) -> dict:
         """Load lessons from Sage/Morgan about which categories and topics perform well."""
@@ -542,9 +728,17 @@ GAPS:
             return ""
 
     def _ai_generate_brief(
-        self, keyword: str, category: str, cluster_key: str = "", primary_url: str = ""
+        self,
+        keyword: str,
+        category: str,
+        cluster_key: str = "",
+        primary_url: str = "",
+        intent_template: str = "",
+        fact_pack: str = "",
+        product: str = "claimcoach",
     ) -> str:
         """Use Claude to generate a detailed content brief."""
+        info = self._product_info(product)
         # Include performance insights if available
         perf_section = ""
         hints = self._load_performance_hints()
@@ -569,7 +763,7 @@ GAPS:
             )
 
         # Run gap analysis to find what competitors miss
-        gap_analysis = self._analyze_competitor_gaps(keyword)
+        gap_analysis = self._analyze_competitor_gaps(keyword) if product == "claimcoach" else ""
         gap_section = ""
         if gap_analysis:
             gap_section = f"\n\nCompetitor Gap Analysis (cover these gaps that existing articles miss):\n{gap_analysis}\n"
@@ -582,14 +776,23 @@ GAPS:
                 f"- Primary URL for this cluster: {primary_url}\n"
                 "- Ensure this new article targets a distinct intent and does not cannibalize the primary URL.\n"
             )
+        intent_section = (
+            "\n\nIntent template requirements:\n"
+            f"- Intent template: {intent_template}\n"
+            "- The final article outline must match this search intent exactly.\n"
+        ) if intent_template else ""
+        fact_section = (
+            "\n\nPre-write fact pack:\n"
+            f"{fact_pack}\n"
+            "- Use these as default source anchors for legal/numeric/timeline claims.\n"
+        ) if fact_pack else ""
 
         prompt = f"""Generate a content brief for an SEO article targeting the keyword: "{keyword}"
 
 Category: {category}
 
-The article is for ClaimCoach (claimcoach.app), an AI tool that helps car owners fight
-lowball insurance total loss settlement offers.
-{perf_section}{gap_section}{cluster_section}
+The article is for {info['brand']} ({info['site_url']}).
+{perf_section}{gap_section}{cluster_section}{intent_section}{fact_section}
 Provide:
 1. Suggested angle/hook (2 sentences)
 2. Key points to cover (5-7 bullets)
@@ -611,6 +814,12 @@ Keep it concise — this is a brief, not the article."""
                 f"- Cluster key: {cluster_key}\n"
                 f"- Primary URL for this intent cluster: {primary_url}\n"
                 "- This article must target distinct intent and avoid cannibalization."
+            )
+        if intent_template:
+            brief += (
+                "\n\nIntent template:\n"
+                f"- {intent_template}\n"
+                "- Match this query intent in intro, H2 flow, and CTA design."
             )
         return brief
 

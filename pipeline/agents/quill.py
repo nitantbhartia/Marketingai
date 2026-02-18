@@ -267,6 +267,33 @@ This reader is stressed and needs to feel understood before they'll act.
 """,
 }
 
+INTENT_TEMPLATE_GUIDANCE = {
+    "dispute_how_to": (
+        "Intent Pattern — Dispute How-To:\n"
+        "- Lead with immediate action.\n"
+        "- Include scripts/templates and timeline.\n"
+        "- Prioritize evidence checklist over background theory."
+    ),
+    "calculator_intent": (
+        "Intent Pattern — Calculator/Estimator:\n"
+        "- Define the formula early.\n"
+        "- Include worked numeric examples and ranges.\n"
+        "- Embed tool placeholder and worksheet-style steps."
+    ),
+    "law_threshold": (
+        "Intent Pattern — Law/Threshold:\n"
+        "- Lead with statute/regulation context.\n"
+        "- Translate legal text into practical implications.\n"
+        "- Add rights + escalation section."
+    ),
+    "negotiation_script": (
+        "Intent Pattern — Negotiation Script:\n"
+        "- Use call/email scripts.\n"
+        "- Include red flags and escalation ladder.\n"
+        "- Keep sections action-oriented."
+    ),
+}
+
 
 class QuillAgent(BaseAgent):
     name = "quill"
@@ -505,6 +532,8 @@ class QuillAgent(BaseAgent):
         internal_links_context = self._format_internal_links(published)
         lessons = self._extract_lessons()
         exemplar_context = self._build_exemplar_context(article, published)
+        fact_pack = self._compose_fact_pack(article)
+        winner_memory = self._build_winner_memory(article, published)
 
         # ── Revision path: targeted fix instead of full rewrite ──
         if is_revision and article.markdown_content:
@@ -563,6 +592,8 @@ class QuillAgent(BaseAgent):
             revision_feedback=article.revision_notes if is_revision else "",
             serp_context=serp_context,
             nhtsa_context=nhtsa_context,
+            fact_pack=fact_pack,
+            winner_memory=winner_memory,
             model_name=outline_model,
             seo_template=seo_template,
             exemplar_context=exemplar_context,
@@ -573,6 +604,8 @@ class QuillAgent(BaseAgent):
             result_text = self._draft_from_outline(
                 article, outline, product_context, state_rules,
                 internal_links_context, is_revision, lessons,
+                fact_pack=fact_pack,
+                winner_memory=winner_memory,
                 seo_template=seo_template,
                 exemplar_context=exemplar_context,
             )
@@ -990,6 +1023,77 @@ SOURCES: source1, source2, source3"""
 
         return "\n".join(lines) if len(lines) > 1 else ""
 
+    def _compose_fact_pack(self, article) -> str:
+        """Return stored fact pack with deterministic fallback anchors."""
+        stored = (getattr(article, "fact_pack", "") or "").strip()
+        if stored:
+            return stored
+        info = self._product_info(article)
+        state = (getattr(article, "target_state", "") or "").strip()
+        lines = [f"- Product: {info['brand']} ({info['site_url']})"]
+        if info["product"] == "medbill":
+            lines.extend(
+                [
+                    "- Source anchors:",
+                    "  - https://www.cms.gov/",
+                    "  - https://www.cms.gov/nosurprises",
+                    "  - https://www.hhs.gov/",
+                    "  - https://www.irs.gov/charities-non-profits/charitable-organizations/requirements-for-501c3-hospitals-under-the-affordable-care-act-section-501r",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "- Source anchors:",
+                    "  - https://content.naic.org/consumer",
+                    "  - https://content.naic.org/state-insurance-departments",
+                    "  - https://www.nhtsa.gov/",
+                ]
+            )
+        if state:
+            lines.append(f"- State focus: {state}")
+        return "\n".join(lines)
+
+    def _build_winner_memory(self, article, published_articles: list) -> str:
+        """Retrieve lightweight pattern memory from winning published articles."""
+        target_product = (getattr(article, "product", "") or "claimcoach").strip().lower()
+        candidates = []
+        for p in published_articles:
+            if (getattr(p, "product", "") or "claimcoach").strip().lower() != target_product:
+                continue
+            if not p.markdown_content:
+                continue
+            if (p.last_gsc_clicks or 0) <= 0 and (p.sage_score or 0) <= 0:
+                continue
+            candidates.append(p)
+        if not candidates:
+            return ""
+        candidates.sort(
+            key=lambda p: (
+                p.last_gsc_clicks or 0,
+                -(p.last_gsc_position or 100),
+                p.sage_score or 0,
+            ),
+            reverse=True,
+        )
+        lines = ["Top-performing patterns to imitate structurally (never copy wording):"]
+        for idx, p in enumerate(candidates[:3], start=1):
+            intro = ""
+            for para in p.markdown_content.split("\n\n"):
+                cleaned = para.strip()
+                if cleaned and not cleaned.startswith("#"):
+                    intro = re.sub(r"\s+", " ", cleaned)[:180]
+                    break
+            h2_count = len(re.findall(r"^##\s+", p.markdown_content, flags=re.MULTILINE))
+            faq_count = len(re.findall(r"^###\s+", p.markdown_content, flags=re.MULTILINE))
+            lines.append(
+                f"- Winner {idx}: '{p.target_keyword}' | clicks={p.last_gsc_clicks or 0}, "
+                f"pos={p.last_gsc_position or 'NA'}, H2={h2_count}, FAQ={faq_count}"
+            )
+            if intro:
+                lines.append(f"  Intro cadence: {intro}")
+        return "\n".join(lines)
+
     def _draft_temperature(self, is_revision: bool) -> float:
         """Use lower variance for revision rounds to reduce repeat failures."""
         return self.REVISION_TEMPERATURE if is_revision else self.DRAFT_TEMPERATURE
@@ -1003,6 +1107,8 @@ SOURCES: source1, source2, source3"""
         revision_feedback: str = "",
         serp_context: str = "",
         nhtsa_context: str = "",
+        fact_pack: str = "",
+        winner_memory: str = "",
         model_name: str | None = None,
         seo_template: str = "",
         exemplar_context: str = "",
@@ -1043,6 +1149,30 @@ SOURCES: source1, source2, source3"""
         if nhtsa_context:
             nhtsa_section = f"\n{nhtsa_context}\n"
 
+        fact_pack_section = ""
+        if getattr(self.config.pipeline, "quill_use_fact_pack", True):
+            raw_fact_pack = fact_pack or (getattr(article, "fact_pack", "") or "")
+            if raw_fact_pack:
+                fact_pack_section = (
+                    "\n=== PRE-WRITE FACT PACK (primary-source anchors) ===\n"
+                    f"{raw_fact_pack[:2200]}\n"
+                )
+
+        winner_memory_section = ""
+        if getattr(self.config.pipeline, "quill_use_winner_memory", True) and winner_memory:
+            winner_memory_section = (
+                "\n=== WINNER PATTERN MEMORY (from top-performing published posts) ===\n"
+                f"{winner_memory[:1800]}\n"
+            )
+
+        intent_template_section = ""
+        if getattr(article, "intent_template", ""):
+            intent_template_section = (
+                "\n=== INTENT TEMPLATE ===\n"
+                f"- Template: {article.intent_template}\n"
+                "- Keep intro/H2/CTA aligned with this intent. Do not drift.\n"
+            )
+
         exemplar_section = ""
         if exemplar_context:
             exemplar_section = (
@@ -1067,7 +1197,7 @@ Content category: {article.content_category or 'general'}
 {f'Category strategy: {category_hint}' if category_hint else ''}
 
 {f'Internal links available: {internal_links}' if internal_links else ''}
-{entity_section}{serp_section}{nhtsa_section}{exemplar_section}{revision_section}{template_section}
+{entity_section}{serp_section}{nhtsa_section}{fact_pack_section}{winner_memory_section}{intent_template_section}{exemplar_section}{revision_section}{template_section}
 Create an outline with:
 1. **Hook** (first 100 words) — how to open with the keyword naturally
 2. **5-7 H2 sections** — each with:
@@ -1119,6 +1249,8 @@ Format as a clean outline with ## headers and bullet points."""
         self, article, outline: str, product_context: str,
         state_rules: str, internal_links: str,
         is_revision: bool, lessons: str,
+        fact_pack: str = "",
+        winner_memory: str = "",
         seo_template: str = "",
         exemplar_context: str = "",
     ) -> str:
@@ -1136,6 +1268,7 @@ Format as a clean outline with ## headers and bullet points."""
             prompt = self._build_prompt(
                 article, product_context, state_rules, internal_links,
                 is_revision=is_revision, lessons=lessons, outline=outline,
+                fact_pack=fact_pack, winner_memory=winner_memory,
                 seo_template=seo_template,
                 exemplar_context=exemplar_context,
             )
@@ -1159,6 +1292,24 @@ Format as a clean outline with ## headers and bullet points."""
             context_block += f"=== INTERNAL LINKS ===\n{internal_links}\n\n"
         if lessons:
             context_block += f"=== PAST LESSONS ===\n{lessons}\n\n"
+        if getattr(self.config.pipeline, "quill_use_fact_pack", True):
+            raw_fact_pack = fact_pack or (getattr(article, "fact_pack", "") or "")
+            if raw_fact_pack:
+                context_block += (
+                    "=== PRE-WRITE FACT PACK ===\n"
+                    f"{raw_fact_pack[:1600]}\n\n"
+                )
+        if getattr(self.config.pipeline, "quill_use_winner_memory", True) and winner_memory:
+            context_block += (
+                "=== WINNER PATTERN MEMORY ===\n"
+                f"{winner_memory[:1200]}\n\n"
+            )
+        if getattr(article, "intent_template", ""):
+            context_block += (
+                "=== INTENT TEMPLATE ===\n"
+                f"{article.intent_template}\n"
+                "Keep this intent intact throughout.\n\n"
+            )
         if exemplar_context:
             context_block += (
                 "=== HIGH-PASS EXEMPLARS (structure seed; never copy wording) ===\n"
@@ -1283,6 +1434,10 @@ Format as a clean outline with ## headers and bullet points."""
         guidance = CATEGORY_GUIDANCE.get(content_category or "", "")
         if guidance:
             base += "\n" + guidance
+        intent = (getattr(article, "intent_template", "") or "").strip().lower() if article else ""
+        intent_guidance = INTENT_TEMPLATE_GUIDANCE.get(intent, "")
+        if intent_guidance:
+            base += "\n\n" + intent_guidance
         return self._apply_branding(base, article=article)
 
     def _build_prompt(
@@ -1294,6 +1449,8 @@ Format as a clean outline with ## headers and bullet points."""
         is_revision: bool,
         lessons: str = "",
         outline: str = "",
+        fact_pack: str = "",
+        winner_memory: str = "",
         seo_template: str = "",
         exemplar_context: str = "",
     ) -> str:
@@ -1313,6 +1470,26 @@ Format as a clean outline with ## headers and bullet points."""
         if lessons:
             parts.append(
                 f"=== LESSONS FROM PAST REVIEWS (avoid these mistakes) ===\n{lessons}\n"
+            )
+
+        if getattr(self.config.pipeline, "quill_use_fact_pack", True):
+            raw_fact_pack = fact_pack or (getattr(article, "fact_pack", "") or "")
+            if raw_fact_pack:
+                parts.append(
+                    f"=== PRE-WRITE FACT PACK (primary sources) ===\n{raw_fact_pack}\n"
+                )
+
+        if getattr(self.config.pipeline, "quill_use_winner_memory", True) and winner_memory:
+            parts.append(
+                "=== WINNER PATTERN MEMORY (retrieval from top performers) ===\n"
+                f"{winner_memory}\n"
+            )
+
+        if getattr(article, "intent_template", ""):
+            parts.append(
+                "=== INTENT TEMPLATE ===\n"
+                f"{article.intent_template}\n"
+                "Match this intent pattern in intro, structure, and CTA placement.\n"
             )
 
         if exemplar_context:

@@ -58,6 +58,10 @@ class Article:
     commercial_intent: float = 0.0
     content_brief: str = ""
     content_category: str = ""
+    intent_template: str = ""
+    cluster_key: str = ""
+    canonical_url: str = ""
+    fact_pack: str = ""
     suggested_title: str = ""
     internal_links: str = "[]"
     external_links: str = "[]"
@@ -189,6 +193,20 @@ CREATE TABLE IF NOT EXISTS articles (
     publisher_claim TEXT DEFAULT '',
     herald_claim TEXT DEFAULT '',
 
+    -- Pipeline planning fields
+    content_brief TEXT DEFAULT '',
+    search_volume INTEGER DEFAULT 0,
+    keyword_difficulty REAL DEFAULT 0.0,
+    commercial_intent REAL DEFAULT 0.0,
+    content_category TEXT DEFAULT '',
+    intent_template TEXT DEFAULT '',
+    cluster_key TEXT DEFAULT '',
+    canonical_url TEXT DEFAULT '',
+    fact_pack TEXT DEFAULT '',
+    suggested_title TEXT DEFAULT '',
+    internal_links TEXT DEFAULT '[]',
+    external_links TEXT DEFAULT '[]',
+
     -- Validation results
     validation_status TEXT DEFAULT '',
     sage_score REAL DEFAULT 0.0,
@@ -271,6 +289,21 @@ CREATE TABLE IF NOT EXISTS social_posts (
 
 CREATE INDEX IF NOT EXISTS idx_social_article ON social_posts(article_id);
 
+CREATE TABLE IF NOT EXISTS cta_variants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_id INTEGER REFERENCES articles(id),
+    cta_text TEXT NOT NULL DEFAULT '',
+    cta_type TEXT DEFAULT '',
+    position TEXT DEFAULT '',
+    impressions INTEGER DEFAULT 0,
+    clicks INTEGER DEFAULT 0,
+    conversions INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cta_variants_article ON cta_variants(article_id);
+
 CREATE TABLE IF NOT EXISTS feedback_lessons (
     id TEXT PRIMARY KEY,
     source_agent TEXT NOT NULL,
@@ -297,6 +330,10 @@ _PIPELINE_COLUMN_MIGRATIONS = {
     "keyword_difficulty": "REAL DEFAULT 0.0",
     "commercial_intent": "REAL DEFAULT 0.0",
     "content_category": "TEXT DEFAULT ''",
+    "intent_template": "TEXT DEFAULT ''",
+    "cluster_key": "TEXT DEFAULT ''",
+    "canonical_url": "TEXT DEFAULT ''",
+    "fact_pack": "TEXT DEFAULT ''",
     "suggested_title": "TEXT DEFAULT ''",
     "internal_links": "TEXT DEFAULT '[]'",
     "external_links": "TEXT DEFAULT '[]'",
